@@ -1,0 +1,61 @@
+### REST Client examples (VSCode extension: REST Client)
+
+@host = http://localhost:4000
+@token = REEMPLAZAR_TOKEN
+
+### Registro
+POST {{host}}/auth/register
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "email": "alice@example.com",
+  "password": "secret123"
+}
+
+### Login
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "username": "alice",
+  "password": "secret123"
+}
+
+### Perfil
+GET {{host}}/auth/profile
+Authorization: Bearer {{token}}
+
+### Crear canal
+POST {{host}}/channels
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "general"
+}
+
+### Listar canales
+GET {{host}}/channels
+Authorization: Bearer {{token}}
+
+### Crear mensaje (senderId ya no se envía: se obtiene del token)
+POST {{host}}/messages
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "content": "Hola a todos",
+  "channelId": 1
+}
+
+### Listar mensajes paginados de un canal
+GET {{host}}/messages?channelId=1&page=1&limit=20
+Authorization: Bearer {{token}}
+
+### Borrar mensaje
+DELETE {{host}}/messages/1
+Authorization: Bearer {{token}}
+
+### Health
+GET {{host}}/health
