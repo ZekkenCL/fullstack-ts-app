@@ -2,6 +2,7 @@ import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiBody, ApiOkResponse, ApiBearerAuth } from '@nestjs/swagger';
 import { AuthService } from '@/auth/auth.service';
 import { AuthCredentialsDto } from '@/auth/dto/auth-credentials.dto';
+import { RefreshTokenDto } from '@/auth/dto/refresh-token.dto';
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
 
 @ApiTags('auth')
@@ -31,7 +32,7 @@ export class AuthController {
   }
 
   @Post('refresh')
-  async refresh(@Body() body: { refreshToken: string }) {
+  async refresh(@Body() body: RefreshTokenDto) {
     return this.authService.rotateRefreshToken(body.refreshToken);
   }
 
