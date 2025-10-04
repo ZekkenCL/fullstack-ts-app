@@ -1,0 +1,17 @@
+{
+  "name": "shared",
+  "version": "1.0.0",
+  "description": "Shared resources for the fullstack TypeScript application",
+  "main": "src/index.ts",
+  "scripts": {
+    "build": "tsc",
+    "lint": "eslint .",
+    "test": "jest"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "typescript": "^4.5.0",
+    "eslint": "^7.32.0",
+    "jest": "^27.0.0"
+  }
+}

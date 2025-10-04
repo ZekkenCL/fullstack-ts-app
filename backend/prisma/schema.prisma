@@ -1,0 +1,60 @@
+model User {
+  id                 Int             @id @default(autoincrement())
+  username           String          @unique
+  email              String          @unique
+  password           String
+  channelMemberships ChannelMember[]
+  messages           Message[]       @relation("UserMessages")
+  refreshTokens      RefreshToken[]
+}
+
+model Channel {
+  id           Int             @id @default(autoincrement())
+  name         String
+  memberships  ChannelMember[]
+  messages     Message[]       @relation("ChannelMessages")
+}
+
+model ChannelMember {
+  userId     Int
+  channelId  Int
+  role       String   @default("member")
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+  channel    Channel  @relation(fields: [channelId], references: [id])
+
+  @@id([userId, channelId])
+  @@index([channelId])
+}
+
+model RefreshToken {
+  id         Int      @id @default(autoincrement())
+  tokenId    String   @unique
+  userId     Int
+  tokenHash  String   // hash del refresh token (no guardar texto plano)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  revokedAt  DateTime?
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+model Message {
+  id        Int      @id @default(autoincrement())
+  content   String
+  senderId  Int
+  channelId Int
+  sender    User     @relation("UserMessages", fields: [senderId], references: [id])
+  channel   Channel  @relation("ChannelMessages", fields: [channelId], references: [id])
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}

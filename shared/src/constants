@@ -1,0 +1,6 @@
+export const APP_NAME = 'FullStack TypeScript App';
+export const APP_VERSION = '1.0.0';
+export const API_BASE_URL = '/api';
+export const SOCKET_URL = 'ws://localhost:3000/socket';
+export const DEFAULT_CHANNEL_NAME = 'General';
+export const MAX_MESSAGE_LENGTH = 2000;

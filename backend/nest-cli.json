@@ -1,0 +1,13 @@
+{
+  "collection": {
+    "root": "src",
+    "entryFile": "main.ts",
+    "language": "ts"
+  },
+  "compilerOptions": {
+    "assets": [
+      "prisma/**/*"
+    ],
+    "watchAssets": true
+  }
+}

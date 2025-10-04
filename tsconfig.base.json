@@ -1,0 +1,26 @@
+{
+  "compilerOptions": {
+    "target": "esnext",
+    "module": "commonjs",
+    "lib": ["esnext", "dom"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@shared/*": ["shared/src/*"],
+      "@frontend/*": ["frontend/src/*"],
+      "@backend/*": ["backend/src/*"]
+    }
+  },
+  "include": [
+    "frontend/**/*",
+    "backend/**/*",
+    "shared/**/*"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
