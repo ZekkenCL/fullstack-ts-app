@@ -16,10 +16,7 @@ export class ChannelRoleGuard implements CanActivate {
     // channelId might come from route param :id
     const channelId = parseInt(req.params?.id, 10);
     if (!channelId) throw new ForbiddenException('Channel id missing');
-    const membership = await (this.channelsService as any).prisma.channelMember.findUnique({
-      where: { userId_channelId: { userId: user.id, channelId } },
-      select: { role: true },
-    });
+    const membership = await this.channelsService.findMembership(channelId, user.id);
     if (!membership) throw new ForbiddenException('Not a channel member');
     if (membership.role !== requiredRole) throw new ForbiddenException('Insufficient role');
     return true;

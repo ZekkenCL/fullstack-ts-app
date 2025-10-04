@@ -14,21 +14,21 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
   const suffix = Date.now();
   const ownerUsername = `owner_${suffix}`;
   const memberUsername = `member_${suffix}`;
+  const validPassword = 'Passw0rd1';
 
   jest.setTimeout(20000);
 
   beforeAll(async () => {
     process.env.JWT_SECRET = 'e2e_secret';
+    if (!process.env.DATABASE_URL) {
+      // fallback to docker-compose defaults
+      process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/mydatabase?schema=public';
+    }
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
     app = moduleRef.createNestApplication();
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-  prisma = app.get(PrismaService);
-  // DB cleanup for just-in-case (only users with our suffix)
-  await prisma.refreshToken.deleteMany({ where: { user: { username: { contains: `_${suffix}` } } } }).catch(() => {});
-  await prisma.channelMember.deleteMany({ where: { user: { username: { contains: `_${suffix}` } } } }).catch(() => {});
-  await prisma.message.deleteMany({ where: { sender: { username: { contains: `_${suffix}` } } } }).catch(() => {});
-  await prisma.user.deleteMany({ where: { username: { in: [ownerUsername, memberUsername] } } }).catch(() => {});
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    prisma = app.get(PrismaService);
   });
 
   afterAll(async () => {
@@ -36,7 +36,7 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
   });
 
   it('register owner user', async () => {
-    const res = await request(app.getHttpServer()).post('/auth/register').send({ username: ownerUsername, password: 'pw' }).expect(201);
+  const res = await request(app.getHttpServer()).post('/auth/register').send({ username: ownerUsername, password: validPassword }).expect(201);
     accessTokenOwner = res.body.accessToken;
     expect(accessTokenOwner).toBeDefined();
   });
@@ -52,7 +52,7 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
   });
 
   it('register second user', async () => {
-    const res = await request(app.getHttpServer()).post('/auth/register').send({ username: memberUsername, password: 'pw' }).expect(201);
+  const res = await request(app.getHttpServer()).post('/auth/register').send({ username: memberUsername, password: validPassword }).expect(201);
     accessTokenMember = res.body.accessToken;
   });
 

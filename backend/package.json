@@ -13,7 +13,10 @@
     "prisma:seed": "node -r ts-node/register prisma/seed.ts",
     "prepare": "prisma generate",
     "lint": "eslint . --ext .ts",
-    "test": "jest"
+    "test": "pnpm test:unit",
+    "test:unit": "jest --config jest.config.js",
+  "test:e2e": "powershell -Command \"$env:JEST_E2E='true'; jest --config jest.e2e.config.js\"",
+    "test:all": "pnpm test:unit && pnpm test:e2e"
   },
   "dependencies": {
     "@nestjs/common": "^10.3.5",

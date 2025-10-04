@@ -6,7 +6,8 @@ module.exports = {
   testEnvironment: 'node',
   rootDir: '.',
   moduleFileExtensions: ['ts', 'js', 'json'],
-  testMatch: ['**/*.spec.ts'],
+  // Exclude any file ending with .e2e-spec.ts
+  testRegex: '^(?!.*\\.e2e-spec\\.ts$).*\\.spec\\.ts$',
   transform: { '^.+\\.(t|j)s$': 'ts-jest' },
   moduleNameMapper: { '^@/(.*)$': '<rootDir>/src/$1' },
   setupFilesAfterEnv: ['<rootDir>/jest.setup.ts'],

@@ -40,6 +40,10 @@ export class ChannelsService {
     return member;
   }
 
+  async findMembership(channelId: number, userId: number) {
+    return (this.prisma as any).channelMember.findUnique({ where: { userId_channelId: { userId, channelId } } });
+  }
+
   async join(channelId: number, userId: number) {
     // Ensure channel exists
     const channel = await this.findOne(channelId);
