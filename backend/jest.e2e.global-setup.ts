@@ -29,13 +29,8 @@ module.exports = async () => {
       throw e2;
     }
   }
-  // Ensure latest schema (covers case where new model fields added but migration not created yet)
-  try {
-    execSync('pnpm prisma db push --accept-data-loss', { stdio: 'inherit', cwd: root });
-  } catch (e) {
-    // eslint-disable-next-line no-console
-    console.warn('[e2e setup] secondary db push (accept data loss) failed (non-fatal)', e instanceof Error ? e.message : e);
-  }
+  // With proper migrations present we no longer perform a forced db push.
+  // If developers forget to create a migration, tests should fail explicitly rather than mutating schema implicitly.
   try {
     execSync('pnpm prisma generate', { stdio: 'inherit', cwd: root });
   } catch (e) {
