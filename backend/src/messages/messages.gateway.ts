@@ -68,10 +68,12 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const user = (client as any).user;
     if (!user?.id) {
       client.emit('error', { message: 'Unauthenticated socket' });
+      this.metrics.recordWsError('sendMessage', 'unauthenticated');
       return;
     }
     if (!payload?.content || !payload.channelId) {
       client.emit('error', { message: 'Invalid payload' });
+      this.metrics.recordWsError('sendMessage', 'invalid_payload');
       return;
     }
 
@@ -82,6 +84,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const allowed = await this.metrics.checkRateLimit(`msg:${key}`, limit, windowMs / 1000);
     if (!allowed) {
       client.emit('error', { message: 'Rate limited' });
+      this.metrics.recordWsError('sendMessage', 'rate_limited');
       return;
     }
     if (!this.metrics['redis']) { // fallback local solo si no hay redis
@@ -100,13 +103,13 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       await this.channelsService.assertMember(payload.channelId, user.id);
     } catch (e) {
       client.emit('error', { message: 'Not a channel member' });
+      this.metrics.recordWsError('sendMessage', 'not_member');
       return;
     }
-    const message = await this.messagesService.create({
-      content: payload.content,
-      channelId: payload.channelId,
-      senderId: user.id,
-    });
+    const start = Date.now();
+    const message = await this.messagesService.create({ content: payload.content, channelId: payload.channelId, senderId: user.id });
+    const latency = (Date.now() - start) / 1000;
+    this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
     this.server.to(room).emit('messageReceived', message);
   }

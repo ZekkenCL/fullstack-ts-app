@@ -9,6 +9,8 @@ export class MetricsService {
   readonly httpRequestDuration: Histogram<string>;
   readonly wsConnections: Gauge<string>;
   readonly wsEventsTotal: Counter<string>;
+  readonly wsErrorsTotal: Counter<string>;
+  readonly wsMessageLatency: Histogram<string>;
   private redis?: Redis;
 
   constructor() {
@@ -39,6 +41,19 @@ export class MetricsService {
       labelNames: ['event'],
       registers: [this.registry],
     });
+    this.wsErrorsTotal = new Counter({
+      name: 'ws_errors_total',
+      help: 'Errores en eventos WebSocket',
+      labelNames: ['event', 'type'],
+      registers: [this.registry],
+    });
+    this.wsMessageLatency = new Histogram({
+      name: 'ws_message_latency_seconds',
+      help: 'Latencia de persistencia de mensajes (sendMessage)',
+      labelNames: ['event'],
+      buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1],
+      registers: [this.registry],
+    });
 
     // Inicializar Redis si variables disponibles
     if (process.env.REDIS_HOST) {
@@ -63,6 +78,14 @@ export class MetricsService {
 
   incrementWsEvent(event: string) {
     this.wsEventsTotal.inc({ event });
+  }
+
+  recordWsError(event: string, type: string) {
+    this.wsErrorsTotal.inc({ event, type });
+  }
+
+  observeMessageLatency(seconds: number) {
+    this.wsMessageLatency.observe({ event: 'sendMessage' }, seconds);
   }
 
   /**

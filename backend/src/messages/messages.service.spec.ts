@@ -1,5 +1,4 @@
 import { MessagesService } from './messages.service';
-import { PrismaService } from '../prisma/prisma.service';
 
 describe('MessagesService', () => {
   let service: MessagesService;
@@ -13,7 +12,7 @@ describe('MessagesService', () => {
   };
 
   beforeEach(() => {
-    service = new MessagesService(prismaMock as unknown as PrismaService);
+    service = new MessagesService(prismaMock as any);
   });
 
   afterEach(() => jest.clearAllMocks());

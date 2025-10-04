@@ -56,26 +56,18 @@ export class AuthService {
     return { tokenId, raw };
   }
 
-  private async enforceActiveTokenLimit(userId: number) {
+  private async trimActiveTokens(userId: number) {
     const maxActive = parseInt(process.env.REFRESH_TOKEN_MAX_ACTIVE || '5', 10);
     if (maxActive <= 0) return;
     const active = await (this.prisma as any).refreshToken.findMany({
       where: { userId, revokedAt: null },
-      orderBy: { createdAt: 'desc' },
-      skip: maxActive - 1, // keep newest (maxActive -1 before index)
+      orderBy: { createdAt: 'asc' },
+      select: { id: true, createdAt: true },
     });
-    if (active.length >= maxActive) {
-      // revoke older tokens beyond limit
-      const toRevoke = await (this.prisma as any).refreshToken.findMany({
-        where: { userId, revokedAt: null },
-        orderBy: { createdAt: 'asc' },
-        skip: maxActive - 1,
-      });
-      if (toRevoke.length) {
-        const ids = toRevoke.map((t: any) => t.id);
-        await (this.prisma as any).refreshToken.updateMany({ where: { id: { in: ids } }, data: { revokedAt: new Date() } });
-      }
-    }
+    if (active.length <= maxActive) return;
+    const overflow = active.length - maxActive;
+  const toRevoke = active.slice(0, overflow).map((t: any) => t.id);
+    await (this.prisma as any).refreshToken.updateMany({ where: { id: { in: toRevoke } }, data: { revokedAt: new Date() } });
   }
 
   private async persistRefreshToken(userId: number, tokenId: string, raw: string) {
@@ -83,7 +75,7 @@ export class AuthService {
     const ttlDays = parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || '7', 10);
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * ttlDays); // ttl configurable
     await (this.prisma as any).refreshToken.create({ data: { userId, tokenId, tokenHash, expiresAt } });
-    await this.enforceActiveTokenLimit(userId);
+    await this.trimActiveTokens(userId);
     return raw;
   }
 

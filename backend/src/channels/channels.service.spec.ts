@@ -1,5 +1,4 @@
 import { ChannelsService } from './channels.service';
-import { PrismaService } from '../prisma/prisma.service';
 
 describe('ChannelsService', () => {
   let service: ChannelsService;
@@ -14,7 +13,7 @@ describe('ChannelsService', () => {
   };
 
   beforeEach(() => {
-    service = new ChannelsService(prismaMock as unknown as PrismaService);
+    service = new ChannelsService(prismaMock as any);
   });
 
   afterEach(() => jest.clearAllMocks());

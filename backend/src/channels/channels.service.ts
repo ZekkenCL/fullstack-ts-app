@@ -8,6 +8,11 @@ type ChannelEntity = Prisma.ChannelGetPayload<{}>;
 export class ChannelsService {
   constructor(private readonly prisma: PrismaService) {}
 
+  // Expose prisma for guards (read-only usage)
+  get prismaClient() {
+    return this.prisma as any;
+  }
+
   async create(data: { name: string; creatorId?: number }): Promise<ChannelEntity> {
     // Create channel and (optionally) membership in a transaction
     if (data.creatorId) {
@@ -30,7 +35,7 @@ export class ChannelsService {
   }
 
   async assertMember(channelId: number, userId: number) {
-    const member = await (this.prisma as any).channelMember.findUnique({ where: { userId_channelId: { userId, channelId } } });
+  const member = await (this.prisma as any).channelMember.findUnique({ where: { userId_channelId: { userId, channelId } } });
     if (!member) throw new ForbiddenException('Not a channel member');
     return member;
   }

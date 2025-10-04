@@ -4,6 +4,8 @@ import { ChannelsService } from './channels.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { ChannelRole } from './channel-role.decorator';
+import { ChannelRoleGuard } from './channel-role.guard';
 import { Prisma } from '@prisma/client';
 
 type ChannelEntity = Prisma.ChannelGetPayload<{}>;
@@ -32,6 +34,8 @@ export class ChannelsController {
   }
 
   @Patch(':id')
+  @ChannelRole('owner')
+  @UseGuards(ChannelRoleGuard)
   async updateChannel(
     @Param('id', ParseIntPipe) id: number,
     @Body() updateDto: UpdateChannelDto,
@@ -40,6 +44,8 @@ export class ChannelsController {
   }
 
   @Delete(':id')
+  @ChannelRole('owner')
+  @UseGuards(ChannelRoleGuard)
   async removeChannel(@Param('id', ParseIntPipe) id: number): Promise<ChannelEntity> {
     return this.channelsService.remove(id);
   }
