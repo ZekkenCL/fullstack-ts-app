@@ -5,6 +5,7 @@ import { ChannelsService } from '../channels/channels.service';
 import { PresenceService } from '../realtime/presence.service';
 import { UseGuards } from '@nestjs/common';
 import { WsAuthGuard } from '../realtime/ws-auth.guard';
+import { MetricsService } from '../metrics/metrics.service';
 
 interface SendMessagePayload { content: string; channelId: number }
 interface JoinChannelPayload { channelId: number }
@@ -21,6 +22,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     private readonly messagesService: MessagesService,
     private readonly presence: PresenceService,
     private readonly channelsService: ChannelsService,
+    private readonly metrics: MetricsService,
   ) {}
 
   afterInit(server: Server) {
@@ -28,7 +30,8 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   }
 
   handleConnection(client: Socket) {
-    console.log(`Client connected: ${client.id}`);
+    this.metrics.incrementWsConnections(1);
+    // console.log(`Client connected: ${client.id}`);
   }
 
   handleDisconnect(client: Socket) {
@@ -36,11 +39,12 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     for (const a of affected) {
       this.server.to(`channel:${a.channelId}`).emit('channelPresence', { channelId: a.channelId, users: a.users });
     }
-    console.log(`Client disconnected: ${client.id}`);
+    this.metrics.incrementWsConnections(-1);
   }
 
   @SubscribeMessage('joinChannel')
   handleJoinChannel(@ConnectedSocket() client: Socket, @MessageBody() payload: JoinChannelPayload) {
+    this.metrics.incrementWsEvent('joinChannel');
     if (!payload?.channelId) return;
     const room = `channel:${payload.channelId}`;
     client.join(room);
@@ -60,6 +64,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
 
   @SubscribeMessage('sendMessage')
   async handleSendMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: SendMessagePayload) {
+    this.metrics.incrementWsEvent('sendMessage');
     const user = (client as any).user;
     if (!user?.id) {
       client.emit('error', { message: 'Unauthenticated socket' });
@@ -70,19 +75,26 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       return;
     }
 
-    // Rate limiting básico
+    // Rate limiting (Redis si existe, fallback in-memory)
     const key = `${user.id}:${payload.channelId}`;
-    const now = Date.now();
-    const windowMs = 3000; // 3s
+    const windowMs = 3000; // 3s window
     const limit = 5;       // máx 5 mensajes/ventana
-    const arr = this.messageBuckets.get(key) ?? [];
-    const recent = arr.filter(ts => now - ts < windowMs);
-    if (recent.length >= limit) {
+    const allowed = await this.metrics.checkRateLimit(`msg:${key}`, limit, windowMs / 1000);
+    if (!allowed) {
       client.emit('error', { message: 'Rate limited' });
       return;
     }
-    recent.push(now);
-    this.messageBuckets.set(key, recent);
+    if (!this.metrics['redis']) { // fallback local solo si no hay redis
+      const now = Date.now();
+      const arr = this.messageBuckets.get(key) ?? [];
+      const recent = arr.filter(ts => now - ts < windowMs);
+      if (recent.length >= limit) {
+        client.emit('error', { message: 'Rate limited' });
+        return;
+      }
+      recent.push(now);
+      this.messageBuckets.set(key, recent);
+    }
 
     try {
       await this.channelsService.assertMember(payload.channelId, user.id);

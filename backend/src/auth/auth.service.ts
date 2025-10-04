@@ -1,4 +1,5 @@
 import { ConflictException, Injectable, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { JwtService } from '@nestjs/jwt';
 import * as crypto from 'crypto';
 import { AuthCredentialsDto } from '@/auth/dto/auth-credentials.dto';
@@ -55,11 +56,34 @@ export class AuthService {
     return { tokenId, raw };
   }
 
+  private async enforceActiveTokenLimit(userId: number) {
+    const maxActive = parseInt(process.env.REFRESH_TOKEN_MAX_ACTIVE || '5', 10);
+    if (maxActive <= 0) return;
+    const active = await (this.prisma as any).refreshToken.findMany({
+      where: { userId, revokedAt: null },
+      orderBy: { createdAt: 'desc' },
+      skip: maxActive - 1, // keep newest (maxActive -1 before index)
+    });
+    if (active.length >= maxActive) {
+      // revoke older tokens beyond limit
+      const toRevoke = await (this.prisma as any).refreshToken.findMany({
+        where: { userId, revokedAt: null },
+        orderBy: { createdAt: 'asc' },
+        skip: maxActive - 1,
+      });
+      if (toRevoke.length) {
+        const ids = toRevoke.map((t: any) => t.id);
+        await (this.prisma as any).refreshToken.updateMany({ where: { id: { in: ids } }, data: { revokedAt: new Date() } });
+      }
+    }
+  }
+
   private async persistRefreshToken(userId: number, tokenId: string, raw: string) {
     const tokenHash = await argon2.hash(raw);
     const ttlDays = parseInt(process.env.REFRESH_TOKEN_TTL_DAYS || '7', 10);
     const expiresAt = new Date(Date.now() + 1000 * 60 * 60 * 24 * ttlDays); // ttl configurable
     await (this.prisma as any).refreshToken.create({ data: { userId, tokenId, tokenHash, expiresAt } });
+    await this.enforceActiveTokenLimit(userId);
     return raw;
   }
 
@@ -94,5 +118,17 @@ export class AuthService {
     const now = new Date();
     const res = await (this.prisma as any).refreshToken.deleteMany({ where: { expiresAt: { lt: now }, revokedAt: null } });
     return { deleted: res.count };
+  }
+
+  // Cron job diario para limpieza de tokens expirados
+  @Cron(CronExpression.EVERY_DAY_AT_1AM)
+  async scheduledCleanup() {
+    try {
+      const result = await this.cleanupExpired();
+      // no logger directo aquí para mantener servicio puro; podría inyectar logger si se desea
+      return result;
+    } catch {
+      return { deleted: 0 };
+    }
   }
 }

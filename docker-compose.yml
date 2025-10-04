@@ -25,10 +25,15 @@ services:
       - DATABASE_URL=postgresql://user:password@db:5432/mydatabase?schema=public
       - JWT_SECRET=dev_secret
       - JWT_EXPIRES=15m
+      - REFRESH_TOKEN_TTL_DAYS=7
+      - REFRESH_TOKEN_MAX_ACTIVE=5
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
     volumes:
       - ./backend:/app
     depends_on:
       - db
+      - redis
 
   db:
     image: postgres:latest
@@ -39,6 +44,13 @@ services:
       POSTGRES_DB: mydatabase
     volumes:
       - db_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - '6379:6379'
+    command: redis-server --save 60 1 --loglevel warning
 
 volumes:
   db_data:

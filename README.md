@@ -148,11 +148,23 @@ pnpm dev
 ## Archivo de ejemplo para pruebas (REST Client)
 Ver `backend/rest.http` para ejemplos listos.
 
-## Notas futuras
-- Añadir refresh tokens
-- Roles/permissions
-- Rate limiting
-- WebSocket events para nuevos mensajes
+## Características Implementadas Backend
+- Autenticación JWT + refresh tokens rotatorios (hash, revocación, TTL configurable)
+- Límite configurable de refresh tokens activos por usuario
+- Limpieza programada (cron diario) de tokens expirados
+- Canales y membresías (owner/member) + validación en HTTP y WebSocket
+- Mensajería tiempo real (Socket.IO)
+- Rate limiting WebSocket (Redis si disponible, fallback in-memory)
+- Logging estructurado (pino) + interceptor + filtro global de excepciones
+- Métricas Prometheus: HTTP + WebSocket (conexiones, eventos)
+- Endpoint admin para cambiar nivel de log en caliente `/admin/log-level`
+
+## Próximos Pasos Sugeridos
+- Métricas adicionales de errores WS / latencia mensajes
+- Tests adicionales (gateways, casos negativos auth, canales)
+- Roles/permissions avanzados (moderadores, etc.)
+- Persistencia de presencia (Redis pub/sub) para escalado horizontal
+- Documentar esquema de eventos WebSocket en OpenAPI o AsyncAPI
 
 
 ## Contributing
