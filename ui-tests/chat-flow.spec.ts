@@ -53,6 +53,8 @@ test.describe('Chat basic flow', () => {
     await pageB.getByPlaceholder('Escribe un mensaje').fill(reply);
     await pageB.getByRole('button', { name: 'Enviar' }).click();
     await expect(pageB.getByText(reply)).toBeVisible();
+  // Give a moment for message propagation to first user's background tab
+  await pageB.waitForTimeout(900);
 
   // Switch back to user A page: ensure unread badge appears on list before selecting
     await page.bringToFront();
