@@ -66,6 +66,11 @@ export default function ChannelsPage() {
     if (!listRef.current) return;
     if (autoScroll) {
       listRef.current.scrollTop = listRef.current.scrollHeight;
+      // marcar leídos los que se ven si estamos en canal activo
+      if (activeChannelId) {
+        const lastId = [...messages].reverse().find(m => m.id)?.id;
+        if (lastId) msgStore.markRead(activeChannelId, lastId);
+      }
     } else {
       setNewSince(prev => prev + 1);
     }
@@ -120,6 +125,9 @@ export default function ChannelsPage() {
       const oldest = msgStore.byChannel[id][0];
       if (oldest?.id) setHistoryCursor(oldest.id);
     }
+    // marcar leídos mensajes existentes
+    const lastId = [...(msgStore.byChannel[id]||[])].reverse().find(m => m.id)?.id;
+    if (lastId) msgStore.markRead(id, lastId);
   };
 
   const send = useCallback(() => {
@@ -151,11 +159,15 @@ export default function ChannelsPage() {
           <div className="space-y-2">
             <h2 className="text-sm font-semibold text-gray-600">Lista</h2>
             <ul className="space-y-2">
-              {channels.map(c => (
-                <li key={c.id} className={`border bg-white rounded p-3 flex justify-between items-center ${activeChannelId===c.id ? 'ring-2 ring-blue-500' : ''}`}>
-                  <button className="flex-1 text-left" onClick={() => { api.joinChannel(c.id); selectChannel(c.id); }}>{c.name}</button>
-                </li>
-              ))}
+              {channels.map(c => {
+                const unread = msgStore.unread[c.id] || 0;
+                return (
+                  <li key={c.id} className={`border bg-white rounded p-3 flex justify-between items-center ${activeChannelId===c.id ? 'ring-2 ring-blue-500' : ''}`}>
+                    <button className="flex-1 text-left" onClick={() => { api.joinChannel(c.id); selectChannel(c.id); }}>{c.name}</button>
+                    {unread > 0 && <span data-testid={`unread-${c.name}`} className="ml-2 inline-flex items-center justify-center text-[10px] font-semibold bg-red-500 text-white rounded-full px-2 py-0.5">{unread}</span>}
+                  </li>
+                );
+              })}
               {!loading && channels.length === 0 && <li className="text-sm text-gray-500">No hay canales.</li>}
             </ul>
           </div>

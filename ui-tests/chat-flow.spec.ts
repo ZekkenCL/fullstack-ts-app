@@ -58,8 +58,9 @@ test.describe('Chat basic flow', () => {
     await page.bringToFront();
 
   // Wait for badge (1 unread)
-  const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: channelName, exact: true }) }).locator('span').filter({ hasText: '1' });
-  await expect(unreadBadge).toBeVisible();
+  // Allow a short delay for WS message to arrive and unread to update
+  const unreadBadge = page.getByTestId(`unread-${channelName}`);
+  await expect(unreadBadge).toHaveText('1');
 
     // Re-select channel to mark read
   await page.getByRole('button', { name: channelName, exact: true }).click();
