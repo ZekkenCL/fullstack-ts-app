@@ -1,0 +1,64 @@
+import { test, expect } from '@playwright/test';
+
+// Helper to create a unique user each run
+function uniqueUser() {
+  const rand = Math.random().toString(36).slice(2, 8);
+  return { username: `u_${rand}`, password: 'Passw0rd!' };
+}
+
+test.describe('Chat basic flow', () => {
+  test('register, create channel, send & receive messages, unread badge', async ({ page }) => {
+    const userA = uniqueUser();
+    const userB = uniqueUser();
+
+    // Register first user (auto logged in)
+    await page.goto('/register');
+    await page.getByPlaceholder('Username').fill(userA.username);
+    await page.getByPlaceholder('Password').fill(userA.password);
+    await page.getByRole('button', { name: /crear/i }).click();
+    await page.waitForURL('**/channels');
+
+    // Create a channel
+    await page.getByPlaceholder('Nuevo canal').fill('general');
+    await page.getByRole('button', { name: 'Crear' }).click();
+    // Click channel list item
+    await page.getByRole('button', { name: 'general' }).click();
+
+    // Send a message
+    const firstMessage = 'Hola desde A';
+    await page.getByPlaceholder('Escribe un mensaje').fill(firstMessage);
+    await page.getByRole('button', { name: 'Enviar' }).click();
+    await expect(page.getByText(firstMessage)).toBeVisible();
+
+    // Open new context for user B
+    const pageB = await page.context().newPage();
+    await pageB.goto('/register');
+    await pageB.getByPlaceholder('Username').fill(userB.username);
+    await pageB.getByPlaceholder('Password').fill(userB.password);
+    await pageB.getByRole('button', { name: /crear/i }).click();
+    await pageB.waitForURL('**/channels');
+
+    // Join channel created by A
+    await pageB.getByRole('button', { name: 'general' }).click();
+
+    // User B sends message
+    const reply = 'Hola A, soy B';
+    await pageB.getByPlaceholder('Escribe un mensaje').fill(reply);
+    await pageB.getByRole('button', { name: 'Enviar' }).click();
+    await expect(pageB.getByText(reply)).toBeVisible();
+
+    // Switch back to user A page: ensure unread badge appears on list before selecting
+    await page.bringToFront();
+
+    // Wait for badge (1 unread)
+    const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: 'general' }) }).locator('span', { hasText: '1' });
+    await expect(unreadBadge).toBeVisible();
+
+    // Re-select channel to mark read
+    await page.getByRole('button', { name: 'general' }).click();
+    await expect(unreadBadge).toHaveCount(0);
+
+    // Confirm reply visible for user A
+    await expect(page.getByText(reply)).toBeVisible();
+  });
+});

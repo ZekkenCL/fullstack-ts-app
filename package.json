@@ -8,15 +8,19 @@
     "shared"
   ],
   "scripts": {
-    "dev": "concurrently \"pnpm --filter frontend dev\" \"pnpm --filter backend dev\"",
+  "dev": "concurrently \"pnpm --dir frontend exec next dev\" \"pnpm --dir backend run dev\"",
+  "dev:front": "pnpm --dir frontend exec next dev",
+  "dev:back": "pnpm --dir backend run dev",
     "build": "pnpm --filter frontend build && pnpm --filter backend build",
     "start": "pnpm --filter backend start",
     "lint": "pnpm --filter frontend lint && pnpm --filter backend lint",
-    "test": "pnpm --filter frontend test && pnpm --filter backend test"
+    "test": "pnpm --filter frontend test && pnpm --filter backend test",
+    "test:ui": "playwright test --reporter=line"
   },
   "devDependencies": {
     "concurrently": "^6.0.0",
-    "typescript": "^5.6.3"
+    "typescript": "^5.6.3",
+    "@playwright/test": "^1.48.0"
   },
   "dependencies": {
     "@types/node": "20.14.10"
