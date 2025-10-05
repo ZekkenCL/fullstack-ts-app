@@ -11,6 +11,9 @@ export class MetricsService {
   readonly wsEventsTotal: Counter<string>;
   readonly wsErrorsTotal: Counter<string>;
   readonly wsMessageLatency: Histogram<string>;
+  // Auth/login metrics
+  private authLoginAttempts?: Counter<string>;
+  private authLoginRateLimited?: Counter<string>;
   private redis?: Redis;
 
   constructor() {
@@ -66,6 +69,31 @@ export class MetricsService {
       // Intentar conectar en background
       this.redis.connect().catch(() => {/* ignore for metrics */});
     }
+  }
+
+  // Exposed helper methods for auth login metrics
+  incrementLoginAttempt(result: 'accepted' | 'blocked') {
+    if (!this.authLoginAttempts) {
+      this.authLoginAttempts = new Counter({
+        name: 'auth_login_attempts_total',
+        help: 'Intentos de login (aceptados o bloqueados)',
+        labelNames: ['result'],
+        registers: [this.registry],
+      });
+    }
+    this.authLoginAttempts.inc({ result });
+  }
+
+  incrementLoginRateLimited(reason: string) {
+    if (!this.authLoginRateLimited) {
+      this.authLoginRateLimited = new Counter({
+        name: 'auth_login_rate_limited_total',
+        help: 'Intentos de login bloqueados por rate limit',
+        labelNames: ['reason'],
+        registers: [this.registry],
+      });
+    }
+    this.authLoginRateLimited.inc({ reason });
   }
 
   async getMetrics() {

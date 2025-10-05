@@ -16,4 +16,12 @@ module.exports = {
   ],
   collectCoverageFrom: ['src/**/*.ts', '!src/main.ts', '!src/**/dto/*.ts', '!src/**/interfaces/**'],
   coverageDirectory: './coverage',
+  coverageThreshold: {
+    global: {
+      lines: 70,
+      statements: 70,
+      branches: 55,
+      functions: 65,
+    },
+  },
 };
