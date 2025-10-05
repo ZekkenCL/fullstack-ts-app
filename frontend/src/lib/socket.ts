@@ -150,7 +150,7 @@ export function useChannel(channelId: number | null) {
       } else {
         const existing = msgStore.byChannel[msg.channelId] || [];
         msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
-        msgStore.recomputeUnread(msg.channelId);
+        msgStore.incrementUnread(msg.channelId);
       }
     });
     return () => { off(); };
