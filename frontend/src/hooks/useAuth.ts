@@ -1,57 +1,28 @@
-import { useState, useEffect } from 'react';
-import { useUserStore } from '../store/useUserStore';
-import { login, logout, getCurrentUser } from '../lib/auth';
+import { useCallback } from 'react';
+import { useAuthStore } from '../store/authStore';
+import { api } from '../lib/apiClient';
 
-const useAuth = () => {
-    const [loading, setLoading] = useState(true);
-    const [error, setError] = useState(null);
-    const setUser = useUserStore((state) => state.setUser);
+// Minimal hook wrapper around authStore + api profile fetch
+export function useAuth() {
+  const { user, setUser, clear, accessToken } = useAuthStore();
 
-    useEffect(() => {
-        const fetchUser = async () => {
-            try {
-                const user = await getCurrentUser();
-                setUser(user);
-            } catch (err) {
-                setError(err);
-            } finally {
-                setLoading(false);
-            }
-        };
+  const fetchProfile = useCallback(async () => {
+    if (!accessToken || user) return user;
+    try {
+      const data = await api.profile();
+      setUser({ username: data.username || data.user?.username || data.name || '' });
+      return data;
+    } catch (_err) {
+      // ignore for now
+      return null;
+    }
+  }, [accessToken, user, setUser]);
 
-        fetchUser();
-    }, [setUser]);
+  const logout = useCallback(() => {
+    clear();
+  }, [clear]);
 
-    const handleLogin = async (credentials) => {
-        setLoading(true);
-        try {
-            const user = await login(credentials);
-            setUser(user);
-        } catch (err) {
-            setError(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    const handleLogout = async () => {
-        setLoading(true);
-        try {
-            await logout();
-            setUser(null);
-        } catch (err) {
-            setError(err);
-        } finally {
-            setLoading(false);
-        }
-    };
-
-    return {
-        loading,
-        error,
-        handleLogin,
-        handleLogout,
-    };
-};
+  return { user, accessToken, fetchProfile, logout };
+}
 
 export default useAuth;
