@@ -6,6 +6,7 @@ model User {
   channelMemberships ChannelMember[]
   messages           Message[]       @relation("UserMessages")
   refreshTokens      RefreshToken[]
+  readStates         ChannelReadState[]
 }
 
 model Channel {
@@ -13,6 +14,7 @@ model Channel {
   name         String
   memberships  ChannelMember[]
   messages     Message[]       @relation("ChannelMessages")
+  readStates   ChannelReadState[]
 }
 
 model ChannelMember {
@@ -48,6 +50,7 @@ model Message {
   channelId Int
   sender    User     @relation("UserMessages", fields: [senderId], references: [id])
   channel   Channel  @relation("ChannelMessages", fields: [channelId], references: [id])
+  readStates ChannelReadState[]
 }
 
 model ChannelReadState {
