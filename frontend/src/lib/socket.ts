@@ -138,10 +138,13 @@ export function useChannel(channelId: number | null) {
               delete timersRef.current[tempId];
             }
             if (activeId) msgStore.setChannel(activeId, clone as ChannelMessage[]);
+            // Ensure lastRead advances now that we have the real id
+            if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
             return clone;
           }
           const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
           if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
+          if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
           return next;
         });
       } else {
