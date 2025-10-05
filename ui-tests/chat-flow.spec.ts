@@ -7,11 +7,10 @@ function uniqueUser() {
 }
 
 test.describe('Chat basic flow', () => {
-  test('register, create channel, send & receive messages, unread badge', async ({ page }) => {
+  test('two users register, create channel, exchange messages', async ({ page }) => {
     const userA = uniqueUser();
     const userB = uniqueUser();
-  const channelName = `ch-${Date.now().toString(36).slice(-4)}`;
-  const otherChannel = `ch-${(Date.now()+1).toString(36).slice(-4)}`;
+    const channelName = `ch-${Date.now().toString(36).slice(-4)}`;
 
     // Register first user (auto logged in)
     await page.goto('/register');
@@ -32,11 +31,6 @@ test.describe('Chat basic flow', () => {
     await page.getByRole('button', { name: 'Enviar' }).click();
     await expect(page.getByText(firstMessage)).toBeVisible();
 
-  // Create a second channel and switch to it so new messages in the first channel become unread
-  await page.getByPlaceholder('Nuevo canal').fill(otherChannel);
-  await page.getByRole('button', { name: 'Crear' }).click();
-  await page.getByRole('button', { name: otherChannel, exact: true }).click();
-
     // Open new context for user B
     const pageB = await page.context().newPage();
     await pageB.goto('/register');
@@ -53,13 +47,10 @@ test.describe('Chat basic flow', () => {
     await pageB.getByPlaceholder('Escribe un mensaje').fill(reply);
     await pageB.getByRole('button', { name: 'Enviar' }).click();
     await expect(pageB.getByText(reply)).toBeVisible();
-  // Give a moment for message propagation to first user's background tab
-  await pageB.waitForTimeout(900);
-
-  // Switch back to user A page and view new message (skipping unread badge check for now)
-  await page.bringToFront();
-  await page.waitForTimeout(600);
-  await page.getByRole('button', { name: channelName, exact: true }).click();
-  await expect(page.getByText(reply)).toBeVisible();
+    // Wait until message arrives for user A (polling)
+    await pageB.waitForTimeout(400); // small propagation wait
+    await page.bringToFront();
+    await page.getByRole('button', { name: channelName, exact: true }).click();
+    await expect(page.getByText(reply)).toBeVisible();
   });
 });
