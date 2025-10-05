@@ -104,11 +104,10 @@ export const socketManager = new SocketManager();
 // Simple hook for channel messages (replaces previous useChannel)
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useMessagesStore } from '../store/messagesStore';
-import type { CachedMessage } from '../store/messagesStore';
+import type { UIMessage } from '../store/messagesStore';
 
-export interface ChannelMessage extends CachedMessage, Partial<SharedMessage> {
-  raw?: any;
-}
+// Extend UIMessage ensuring optional domain fields for reconciliation
+export interface ChannelMessage extends UIMessage { raw?: any; id?: number; content?: string; channelId?: number; senderId?: number; }
 
 export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
@@ -126,6 +125,7 @@ export function useChannel(channelId: number | null) {
     if (!channelId) return;
     socketManager.joinChannel(channelId);
     const off = socketManager.on('messageReceived', (msg: any) => {
+      // Active channel: perform optimistic reconciliation
       if (msg.channelId === channelId) {
         setMessages(prev => {
           const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
@@ -140,11 +140,17 @@ export function useChannel(channelId: number | null) {
             if (channelId) msgStore.setChannel(channelId, clone as ChannelMessage[]);
             return clone;
           }
-            const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
-            if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
-            return next;
+          const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
+          if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+          return next;
         });
+        // mark read automatically for active channel (scroll logic will adjust lastRead id); optional skip here
+        return;
       }
+      // Inactive channel: store message and recompute unread count
+      const existing = msgStore.byChannel[msg.channelId] || [];
+      msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
+      msgStore.recomputeUnread(msg.channelId);
     });
     return () => { off(); };
   }, [channelId]);
