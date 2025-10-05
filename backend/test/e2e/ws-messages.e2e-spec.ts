@@ -60,6 +60,7 @@ describe('E2E WebSocket Messages', () => {
   });
 
   it('connect socket and join channel then send message', async () => {
+    const errorEvents: any[] = [];
     await new Promise<void>((resolve, reject) => {
       const urlWithToken = `${baseUrl}?token=${accessToken}`;
       socket = io(urlWithToken, {
@@ -71,19 +72,13 @@ describe('E2E WebSocket Messages', () => {
       const timers: NodeJS.Timeout[] = [];
       const cleanup = () => timers.forEach(t => clearTimeout(t));
   socket.on('connect_error', (err: any) => { console.error('connect_error', err?.message || err); cleanup(); reject(err); });
-      socket.on('error', (e) => { /* swallow for now */ });
+  socket.on('error', (e) => { errorEvents.push(e); });
       socket.on('connect', () => {
-        // eslint-disable-next-line no-console
-        console.log('socket connected');
         socket.emit('joinChannel', { channelId });
       });
       let joined = false;
       let messageSent = false;
-      // log all events
-      (socket as any).onAny((event: string, ...args: any[]) => {
-        // eslint-disable-next-line no-console
-        console.log('[client onAny]', event, args?.[0]?.channelId || '', args[0]?.message || '');
-      });
+      // (removed verbose onAny debug logging)
       socket.on('joinedChannel', async (p: any) => {
         if (p?.room && !messageSent) {
           joined = true;
@@ -92,12 +87,13 @@ describe('E2E WebSocket Messages', () => {
           socket.emit('sendMessage', { channelId, content: 'hola ws' });
         }
       });
-      socket.on('error', (e: any) => { console.error('socket event error', e); });
+    socket.on('error', (_e: any) => { /* already captured above */ });
       socket.on('channelPresence', async (_p: any) => { /* presence observed but we now act after joinedChannel */ });
       socket.on('messageReceived', (msg: any) => {
         try {
           expect(msg.content).toBe('hola ws');
           expect(msg.channelId).toBe(channelId);
+          expect(errorEvents).toHaveLength(0);
           cleanup();
           resolve();
         } catch (e) { cleanup(); reject(e); }

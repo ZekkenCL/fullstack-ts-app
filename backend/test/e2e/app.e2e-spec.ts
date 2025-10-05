@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const request = require('supertest');
 import { AppModule } from '../../src/app.module';
+import { resetDatabase } from './utils/db-reset';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 describe('E2E Basic (Auth + Channels + Roles)', () => {
@@ -28,7 +29,10 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
     app = moduleRef.createNestApplication();
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
+    // Clean DB to isolate spec
     prisma = app.get(PrismaService);
+    await resetDatabase(prisma as any);
+    // prisma already set
   });
 
   afterAll(async () => {

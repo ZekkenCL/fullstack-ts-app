@@ -47,8 +47,6 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.metrics.incrementWsEvent('joinChannel');
     if (!payload?.channelId) return;
     const room = `channel:${payload.channelId}`;
-    // eslint-disable-next-line no-console
-    console.log('[Gateway] joinChannel received', payload, 'socket user=', (client as any).user);
     client.join(room);
     const user = (client as any).user;
     if (user) {
@@ -110,8 +108,6 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
     const start = Date.now();
     const message = await this.messagesService.create({ content: payload.content, channelId: payload.channelId, senderId: user.id });
-  // eslint-disable-next-line no-console
-  console.log('[Gateway] sendMessage broadcast', message);
     const latency = (Date.now() - start) / 1000;
     this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
