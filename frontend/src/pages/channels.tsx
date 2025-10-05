@@ -6,7 +6,7 @@ import { useChannel, useChannelPresence, useTyping } from '../lib/socket';
 import { useMessagesStore } from '../store/messagesStore';
 
 import type { SharedChannel } from '../../../shared/src/types';
-interface Channel extends SharedChannel {}
+interface Channel extends SharedChannel { unread?: number }
 
 export default function ChannelsPage() {
   const { accessToken, user, clear } = useAuthStore();
@@ -69,7 +69,10 @@ export default function ChannelsPage() {
       // marcar leídos los que se ven si estamos en canal activo
       if (activeChannelId) {
         const lastId = [...messages].reverse().find(m => m.id)?.id;
-        if (lastId) msgStore.markRead(activeChannelId, lastId);
+        if (lastId) {
+          msgStore.markRead(activeChannelId, lastId);
+          api.markChannelRead(activeChannelId, lastId).catch(()=>{});
+        }
       }
     } else {
       setNewSince(prev => prev + 1);
@@ -127,7 +130,10 @@ export default function ChannelsPage() {
     }
     // marcar leídos mensajes existentes
     const lastId = [...(msgStore.byChannel[id]||[])].reverse().find(m => m.id)?.id;
-    if (lastId) msgStore.markRead(id, lastId);
+    if (lastId) {
+      msgStore.markRead(id, lastId);
+      api.markChannelRead(id, lastId).catch(()=>{});
+    }
   };
 
   const send = useCallback(() => {
@@ -162,7 +168,8 @@ export default function ChannelsPage() {
               {channels.map(c => {
                 const channelMessages = msgStore.byChannel[c.id] || [];
                 const lastRead = msgStore.lastRead[c.id] || 0;
-                const unread = channelMessages.filter(m => m.id && m.id > lastRead).length;
+                const localUnread = channelMessages.filter(m => m.id && m.id > lastRead).length;
+                const unread = c.unread !== undefined ? c.unread : localUnread;
                 return (
                   <li key={c.id} className={`border bg-white rounded p-3 flex justify-between items-center ${activeChannelId===c.id ? 'ring-2 ring-blue-500' : ''}`}>
                     <button className="flex-1 text-left" onClick={() => { api.joinChannel(c.id); selectChannel(c.id); }}>{c.name}</button>

@@ -120,6 +120,7 @@ export const api = {
   login: (username: string, password: string) => apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   profile: () => apiRequest('/auth/profile', { method: 'POST', auth: true }),
   listChannels: () => apiRequest('/channels', { method: 'GET', auth: true }),
+  markChannelRead: (id: number, messageId?: number) => apiRequest(`/channels/${id}/read`, { method: 'POST', auth: true, body: JSON.stringify(messageId ? { messageId } : {}) }),
   createChannel: (name: string) => apiRequest('/channels', { method: 'POST', auth: true, body: JSON.stringify({ name }) }),
   joinChannel: (id: number) => apiRequest(`/channels/${id}/join`, { method: 'POST', auth: true }),
   channelMessages: (id: number, params: { cursor?: number; limit?: number } = {}) => {
