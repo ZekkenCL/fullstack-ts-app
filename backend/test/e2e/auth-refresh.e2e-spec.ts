@@ -3,6 +3,7 @@ import { Test } from '@nestjs/testing';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const request = require('supertest');
 import { AppModule } from '../../src/app.module';
+import { resetDatabase } from './utils/db-reset';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
 /*
@@ -37,6 +38,7 @@ describe('E2E Auth Refresh Rotation', () => {
     app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
     await app.init();
     prisma = app.get(PrismaService);
+    await resetDatabase(prisma as any);
   });
 
   afterAll(async () => {

@@ -5,6 +5,7 @@ const request = require('supertest');
 import { AppModule } from '../../src/app.module';
 import { SocketAdapter } from '../../src/realtime/socket.adapter';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { resetDatabase } from './utils/db-reset';
 import { io, Socket } from 'socket.io-client';
 
 /*
@@ -52,6 +53,7 @@ describe('E2E WebSocket Messages', () => {
   });
 
   it('register user & create channel', async () => {
+    await resetDatabase(prisma as any);
     const reg = await request(app.getHttpServer()).post('/auth/register').send({ username, password }).expect(201);
     accessToken = reg.body.accessToken;
     const ch = await request(app.getHttpServer()).post('/channels').set('Authorization', `Bearer ${accessToken}`).send({ name: 'ws-general' }).expect(201);
