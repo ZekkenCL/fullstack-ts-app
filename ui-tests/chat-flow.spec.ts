@@ -58,6 +58,7 @@ test.describe('Chat basic flow', () => {
 
   // Switch back to user A page: ensure unread badge appears on list before selecting
     await page.bringToFront();
+  await page.waitForTimeout(600); // allow background WS event processing
 
   // Wait for badge (1 unread)
   // Allow a short delay for WS message to arrive and unread to update
