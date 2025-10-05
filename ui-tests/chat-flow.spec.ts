@@ -10,6 +10,7 @@ test.describe('Chat basic flow', () => {
   test('register, create channel, send & receive messages, unread badge', async ({ page }) => {
     const userA = uniqueUser();
     const userB = uniqueUser();
+    const channelName = `ch-${Date.now().toString(36).slice(-4)}`;
 
     // Register first user (auto logged in)
     await page.goto('/register');
@@ -19,10 +20,10 @@ test.describe('Chat basic flow', () => {
     await page.waitForURL('**/channels');
 
     // Create a channel
-    await page.getByPlaceholder('Nuevo canal').fill('general');
-    await page.getByRole('button', { name: 'Crear' }).click();
-    // Click channel list item
-    await page.getByRole('button', { name: 'general' }).click();
+  await page.getByPlaceholder('Nuevo canal').fill(channelName);
+  await page.getByRole('button', { name: 'Crear' }).click();
+  // Click channel list item (exact match to avoid substring collisions)
+  await page.getByRole('button', { name: channelName, exact: true }).click();
 
     // Send a message
     const firstMessage = 'Hola desde A';
@@ -39,7 +40,7 @@ test.describe('Chat basic flow', () => {
     await pageB.waitForURL('**/channels');
 
     // Join channel created by A
-    await pageB.getByRole('button', { name: 'general' }).click();
+  await pageB.getByRole('button', { name: channelName, exact: true }).click();
 
     // User B sends message
     const reply = 'Hola A, soy B';
@@ -51,11 +52,11 @@ test.describe('Chat basic flow', () => {
     await page.bringToFront();
 
     // Wait for badge (1 unread)
-    const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: 'general' }) }).locator('span', { hasText: '1' });
+  const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: channelName, exact: true }) }).locator('span', { hasText: '1' });
     await expect(unreadBadge).toBeVisible();
 
     // Re-select channel to mark read
-    await page.getByRole('button', { name: 'general' }).click();
+  await page.getByRole('button', { name: channelName, exact: true }).click();
     await expect(unreadBadge).toHaveCount(0);
 
     // Confirm reply visible for user A
