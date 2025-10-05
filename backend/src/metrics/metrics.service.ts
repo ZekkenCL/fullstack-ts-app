@@ -11,6 +11,7 @@ export class MetricsService {
   readonly wsEventsTotal: Counter<string>;
   readonly wsErrorsTotal: Counter<string>;
   readonly wsMessageLatency: Histogram<string>;
+  readonly wsClientRoundTrip: Histogram<string>;
   // Auth/login metrics
   private authLoginAttempts?: Counter<string>;
   private authLoginRateLimited?: Counter<string>;
@@ -55,6 +56,13 @@ export class MetricsService {
       help: 'Latencia de persistencia de mensajes (sendMessage)',
       labelNames: ['event'],
       buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1],
+      registers: [this.registry],
+    });
+    this.wsClientRoundTrip = new Histogram({
+      name: 'ws_client_round_trip_seconds',
+      help: 'Latencia total percibida cliente (emit -> receive echo)',
+      labelNames: ['event'],
+      buckets: [0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2],
       registers: [this.registry],
     });
 
@@ -114,6 +122,10 @@ export class MetricsService {
 
   observeMessageLatency(seconds: number) {
     this.wsMessageLatency.observe({ event: 'sendMessage' }, seconds);
+  }
+
+  observeClientRoundTrip(seconds: number) {
+    this.wsClientRoundTrip.observe({ event: 'sendMessage' }, seconds);
   }
 
   /**

@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
 import { useChannel, useChannelPresence, useTyping } from '../lib/socket';
+import { useMessagesStore } from '../store/messagesStore';
 
 import type { SharedChannel } from '../../../shared/src/types';
 interface Channel extends SharedChannel {}
@@ -16,6 +17,9 @@ export default function ChannelsPage() {
   const [newName, setNewName] = useState('');
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
   const { messages, sendMessage, resendMessage } = useChannel(activeChannelId);
+  const msgStore = useMessagesStore();
+  const [historyCursor, setHistoryCursor] = useState<number | null>(null);
+  const [loadingHistory, setLoadingHistory] = useState(false);
   const presence = useChannelPresence(activeChannelId);
   const { typingUsers, emitTyping } = useTyping(activeChannelId);
   const [draft, setDraft] = useState('');
@@ -23,12 +27,39 @@ export default function ChannelsPage() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [newSince, setNewSince] = useState(0);
 
-  const onScroll = () => {
+  const onScroll = async () => {
     if (!listRef.current) return;
     const el = listRef.current;
     const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
     setAutoScroll(atBottom);
     if (atBottom) setNewSince(0);
+    // Load older history when near top
+    if (activeChannelId && el.scrollTop < 80 && !loadingHistory && historyCursor) {
+      setLoadingHistory(true);
+      try {
+        const res = await api.channelMessages(activeChannelId, { cursor: historyCursor, limit: 30 });
+        // res: { items: [...older ascending...], nextCursor }
+        if (res.items && res.items.length) {
+          // Preserve scroll position after prepending
+          const prevHeight = el.scrollHeight;
+          const existing = msgStore.byChannel[activeChannelId] || [];
+          const merged = [...res.items, ...existing];
+          msgStore.setChannel(activeChannelId, merged);
+          setHistoryCursor(res.nextCursor);
+          requestAnimationFrame(() => {
+            const newHeight = el.scrollHeight;
+            el.scrollTop = newHeight - prevHeight; // keep viewport anchored
+          });
+        } else {
+          setHistoryCursor(null); // no more
+        }
+      } catch (e:any) {
+        // optional: set error toast already handled globally
+        setHistoryCursor(null);
+      } finally {
+        setLoadingHistory(false);
+      }
+    }
   };
 
   useEffect(() => {
@@ -71,8 +102,24 @@ export default function ChannelsPage() {
     }
   };
 
-  const selectChannel = (id: number) => {
+  const selectChannel = async (id: number) => {
     setActiveChannelId(id);
+    // Load initial batch if not already cached
+    if (!msgStore.byChannel[id] || msgStore.byChannel[id].length === 0) {
+      try {
+        const res = await api.channelMessages(id, { limit: 50 });
+        if (res.items) msgStore.setChannel(id, res.items);
+        setHistoryCursor(res.nextCursor);
+        // scroll to bottom after first paint
+        requestAnimationFrame(() => scrollToBottom());
+      } catch (e:any) {
+        // ignore - error toast already handled
+      }
+    } else {
+      // Determine next cursor from oldest cached message
+      const oldest = msgStore.byChannel[id][0];
+      if (oldest?.id) setHistoryCursor(oldest.id);
+    }
   };
 
   const send = useCallback(() => {
@@ -130,7 +177,8 @@ export default function ChannelsPage() {
                       </div>
                     </div>
                   )}
-                  {messages.length === 0 && <p className="text-xs text-gray-500">Sin mensajes aún.</p>}
+                  {loadingHistory && <p className="text-[10px] text-gray-400">Cargando historial...</p>}
+                  {messages.length === 0 && !loadingHistory && <p className="text-xs text-gray-500">Sin mensajes aún.</p>}
                   {messages.map((m, idx) => {
                     const statusClass = m.status === 'pending' ? 'opacity-60 italic' : m.status === 'failed' ? 'text-red-600' : '';
                     return (

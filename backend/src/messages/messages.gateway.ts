@@ -7,7 +7,7 @@ import { UseGuards } from '@nestjs/common';
 import { WsAuthGuard } from '../realtime/ws-auth.guard';
 import { MetricsService } from '../metrics/metrics.service';
 
-interface SendMessagePayload { content: string; channelId: number; clientMsgId?: string }
+interface SendMessagePayload { content: string; channelId: number; clientMsgId?: string; clientSentAt?: number }
 interface TypingPayload { channelId: number; typing: boolean }
 interface JoinChannelPayload { channelId: number }
 
@@ -113,6 +113,12 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
     const enriched = payload.clientMsgId ? { ...message, clientMsgId: payload.clientMsgId } : message;
+    if (payload.clientSentAt && typeof payload.clientSentAt === 'number') {
+      const rttSeconds = (Date.now() - payload.clientSentAt) / 1000;
+      if (rttSeconds >= 0 && rttSeconds < 60) {
+        this.metrics.observeClientRoundTrip(rttSeconds);
+      }
+    }
     this.server.to(room).emit('messageReceived', enriched);
   }
 

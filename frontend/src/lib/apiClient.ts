@@ -122,4 +122,11 @@ export const api = {
   listChannels: () => apiRequest('/channels', { method: 'GET', auth: true }),
   createChannel: (name: string) => apiRequest('/channels', { method: 'POST', auth: true, body: JSON.stringify({ name }) }),
   joinChannel: (id: number) => apiRequest(`/channels/${id}/join`, { method: 'POST', auth: true }),
+  channelMessages: (id: number, params: { cursor?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.cursor) qs.set('cursor', String(params.cursor));
+    const q = qs.toString();
+    return apiRequest(`/channels/${id}/messages${q ? `?${q}`:''}`, { method: 'GET', auth: true });
+  },
 };

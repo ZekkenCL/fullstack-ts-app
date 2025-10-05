@@ -1,6 +1,7 @@
-import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Patch, Delete, ParseIntPipe, UseGuards, Req, Query } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { ChannelsService } from './channels.service';
+import { MessagesService, ChannelHistoryResult } from '../messages/messages.service';
 import { CreateChannelDto } from './dto/create-channel.dto';
 import { UpdateChannelDto } from './dto/update-channel.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -15,7 +16,7 @@ type ChannelEntity = Prisma.ChannelGetPayload<{}>;
 @Controller('channels')
 @UseGuards(JwtAuthGuard)
 export class ChannelsController {
-  constructor(private readonly channelsService: ChannelsService) {}
+  constructor(private readonly channelsService: ChannelsService, private readonly messagesService: MessagesService) {}
 
   @Get()
   async getAllChannels(): Promise<ChannelEntity[]> {
@@ -25,6 +26,20 @@ export class ChannelsController {
   @Get(':id')
   async getChannelById(@Param('id', ParseIntPipe) id: number): Promise<ChannelEntity | null> {
     return this.channelsService.findOne(id);
+  }
+
+  @Get(':id/messages')
+  async getChannelMessages(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Req() req?: any
+  ): Promise<ChannelHistoryResult<any>> {
+    // membership enforcement
+    await this.channelsService.assertMember(id, req.user.id);
+    const lim = Math.max(1, Math.min(parseInt(limit || '50', 10) || 50, 100));
+    const cur = cursor ? parseInt(cursor, 10) : undefined;
+    return this.messagesService.channelHistory(id, lim, cur);
   }
 
   @Post()

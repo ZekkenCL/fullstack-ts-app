@@ -157,7 +157,7 @@ export function useChannel(channelId: number | null) {
       if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
       return next;
     });
-  socketManager.emit('sendMessage', { channelId, content, clientMsgId: tempId });
+  socketManager.emit('sendMessage', { channelId, content, clientMsgId: tempId, clientSentAt: Date.now() });
     timersRef.current[tempId] = setTimeout(() => {
       setMessages(prev => {
         const next = prev.map(m => m.tempId === tempId && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
@@ -177,7 +177,7 @@ export function useChannel(channelId: number | null) {
       const newTemp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
       clone[idx] = { ...original, tempId: newTemp, status: 'pending' } as ChannelMessage;
       // emit again
-  socketManager.emit('sendMessage', { channelId, content: original.content, clientMsgId: newTemp });
+  socketManager.emit('sendMessage', { channelId, content: original.content, clientMsgId: newTemp, clientSentAt: Date.now() });
       timersRef.current[newTemp] = setTimeout(() => {
         setMessages(p => {
           const next = p.map(m => m.tempId === newTemp && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
