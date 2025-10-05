@@ -11,6 +11,8 @@ import { MetricsService } from '../metrics/metrics.service';
 interface SendMessagePayload { content: string; channelId: number; clientMsgId?: string; clientSentAt?: number }
 interface TypingPayload { channelId: number; typing: boolean }
 interface JoinChannelPayload { channelId: number }
+interface EditMessagePayload { messageId: number; channelId: number; content: string }
+interface DeleteMessagePayload { messageId: number; channelId: number }
 
 @WebSocketGateway()
 @UseGuards(WsAuthGuard)
@@ -162,5 +164,33 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     await this.reactions.removeReaction(user.id, payload.messageId, payload.emoji);
     const room = `channel:${payload.channelId}`;
     this.server.to(room).emit('reactionUpdate', { type: 'remove', messageId: payload.messageId, emoji: payload.emoji, userId: user.id });
+  }
+
+  @SubscribeMessage('messageEdit')
+  async handleMessageEdit(@ConnectedSocket() client: Socket, @MessageBody() payload: EditMessagePayload) {
+    const user = (client as any).user;
+    if (!user?.id || !payload?.channelId || !payload?.messageId || !payload?.content) return;
+    try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
+    try {
+      const updated = await this.messagesService.edit(payload.messageId, user.id, payload.content.trim());
+      const room = `channel:${payload.channelId}`;
+      this.server.to(room).emit('messageUpdated', { ...updated, username: user.username });
+    } catch (e: any) {
+      client.emit('error', { message: 'Edit failed' });
+    }
+  }
+
+  @SubscribeMessage('messageDelete')
+  async handleMessageDelete(@ConnectedSocket() client: Socket, @MessageBody() payload: DeleteMessagePayload) {
+    const user = (client as any).user;
+    if (!user?.id || !payload?.channelId || !payload?.messageId) return;
+    try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
+    try {
+      await this.messagesService.remove(payload.messageId, user.id);
+      const room = `channel:${payload.channelId}`;
+      this.server.to(room).emit('messageDeleted', { messageId: payload.messageId });
+    } catch (e: any) {
+      client.emit('error', { message: 'Delete failed' });
+    }
   }
 }

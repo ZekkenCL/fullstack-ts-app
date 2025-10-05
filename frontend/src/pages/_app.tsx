@@ -23,8 +23,14 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
     }
     if (accessToken && !user) {
       api.profile().then(data => {
-        const username = data.username || data.user?.username || data.name || '';
-        setUser({ username });
+        // Expect shape { user: { id, username, ... } }
+        const apiUser = data.user || data;
+        if (apiUser && typeof apiUser.id === 'number') {
+          setUser({ id: apiUser.id, username: apiUser.username || apiUser.name || '' });
+        } else {
+          const username = apiUser?.username || apiUser?.name || '';
+          setUser({ id: -1, username });
+        }
       }).catch(() => {
         clear();
         if (needsAuth) router.replace('/login');

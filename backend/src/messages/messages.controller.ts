@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, Delete, UseGuards, Req, UnauthorizedException, ForbiddenException } from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Query, ParseIntPipe, Delete, UseGuards, Req, UnauthorizedException, ForbiddenException, Patch } from '@nestjs/common';
 import { ApiTags, ApiBearerAuth, ApiBody } from '@nestjs/swagger';
 import { MessagesService } from './messages.service';
 import { ChannelsService } from '../channels/channels.service';
@@ -46,8 +46,34 @@ export class MessagesController {
     return { page, limit, total, items };
   }
 
+  @Patch(':id')
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: { content: string },
+    @Req() req: any,
+  ): Promise<MessageEntity> {
+    const user = req.user;
+    if (!user?.id) throw new UnauthorizedException();
+    if (!body?.content || body.content.trim().length === 0) throw new ForbiddenException('Invalid content');
+    try {
+      return await this.messagesService.edit(id, user.id, body.content.trim());
+    } catch (e: any) {
+      if (e.message === 'Message not found') throw new ForbiddenException('Not found');
+      if (e.message === 'Forbidden') throw new ForbiddenException('Not owner');
+      throw e;
+    }
+  }
+
   @Delete(':id')
-  remove(@Param('id', ParseIntPipe) id: number): Promise<MessageEntity> {
-    return this.messagesService.remove(id);
+  async remove(@Param('id', ParseIntPipe) id: number, @Req() req: any): Promise<MessageEntity> {
+    const user = req.user;
+    if (!user?.id) throw new UnauthorizedException();
+    try {
+      return await this.messagesService.remove(id, user.id);
+    } catch (e: any) {
+      if (e.message === 'Message not found') throw new ForbiddenException('Not found');
+      if (e.message === 'Forbidden') throw new ForbiddenException('Not owner');
+      throw e;
+    }
   }
 }

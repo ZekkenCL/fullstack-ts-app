@@ -83,7 +83,7 @@ export class AuthService {
     const accessToken = this.signAccessToken(userId, username);
     const { tokenId, raw } = this.generateRefreshTokenPair();
     const refreshToken = await this.persistRefreshToken(userId, tokenId, raw);
-    return { accessToken, refreshToken };
+    return { accessToken, refreshToken, user: { id: userId, username } };
   }
 
   async rotateRefreshToken(oldToken: string) {

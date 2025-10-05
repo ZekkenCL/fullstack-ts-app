@@ -16,9 +16,10 @@ export default function RegisterPage() {
     e.preventDefault();
     setError(null);
     try {
-      const data = await api.register(username, password);
-      setTokens(data.accessToken, data.refreshToken);
-      setUser({ username });
+  const data = await api.register(username, password);
+  setTokens(data.accessToken, data.refreshToken);
+  if (data.user) setUser({ id: data.user.id, username: data.user.username });
+  else setUser({ id: -1, username });
       router.push('/channels');
     } catch (e: any) {
       setError(e.message || 'Error');

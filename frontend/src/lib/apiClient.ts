@@ -29,6 +29,9 @@ async function performRefresh(currentRefresh: string, store: ReturnType<typeof g
     if (!res.ok) return false;
     const data = await res.json();
     store.getState().setTokens(data.accessToken, data.refreshToken);
+    if (data.user && typeof data.user.id === 'number') {
+      store.getState().setUser?.({ id: data.user.id, username: data.user.username });
+    }
     return true;
   } catch {
     return false;

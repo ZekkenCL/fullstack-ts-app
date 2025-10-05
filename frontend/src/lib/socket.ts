@@ -196,7 +196,25 @@ export function useChannel(channelId: number | null) {
         return updated;
       });
     });
-    return () => { offReceived(); offAck(); offReaction(); };
+    const offUpdated = socketManager.on('messageUpdated', (msg: any) => {
+      const activeId = currentChannelRef.current;
+      setMessages(prev => {
+        const next = prev.map(m => m.id === msg.id ? { ...m, content: msg.content, updatedAt: msg.updatedAt, status: 'sent' } : m) as ChannelMessage[];
+        if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
+        messagesRef.current = next;
+        return next;
+      });
+    });
+    const offDeleted = socketManager.on('messageDeleted', (evt: any) => {
+      const activeId = currentChannelRef.current;
+      setMessages(prev => {
+        const next = prev.filter(m => m.id !== evt.messageId) as ChannelMessage[];
+        if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
+        messagesRef.current = next;
+        return next;
+      });
+    });
+    return () => { offReceived(); offAck(); offReaction(); offUpdated(); offDeleted(); };
   }, []);
 
   // Track current channel id ref & join channel on change
@@ -257,7 +275,16 @@ export function useChannel(channelId: number | null) {
     socketManager.emit('reactionRemove', { channelId, messageId, emoji });
   }, [channelId]);
 
-  return { messages, sendMessage, resendMessage, addReaction, removeReaction };
+  const editMessage = useCallback((messageId: number, content: string) => {
+    if (!channelId) return;
+    socketManager.emit('messageEdit', { channelId, messageId, content });
+  }, [channelId]);
+  const deleteMessage = useCallback((messageId: number) => {
+    if (!channelId) return;
+    socketManager.emit('messageDelete', { channelId, messageId });
+  }, [channelId]);
+
+  return { messages, sendMessage, resendMessage, addReaction, removeReaction, editMessage, deleteMessage };
 }
 
 // Presence hook: listens to channelPresence events and filters by channelId

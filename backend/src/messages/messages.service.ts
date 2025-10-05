@@ -15,6 +15,14 @@ export class MessagesService {
     return (this.prisma as any).message.create({ data });
   }
 
+  async edit(id: number, userId: number, content: string): Promise<MessageEntity> {
+    // Verificar autoría
+    const existing = await (this.prisma as any).message.findUnique({ where: { id } });
+    if (!existing) throw new Error('Message not found');
+    if (existing.senderId !== userId) throw new Error('Forbidden');
+    return (this.prisma as any).message.update({ where: { id }, data: { content, updatedAt: new Date() } });
+  }
+
   async findByChannel(channelId: number, page = 1, limit = 50): Promise<MessageEntity[]> {
     const skip = (page - 1) * limit;
     return (this.prisma as any).message.findMany({ where: { channelId }, orderBy: { id: 'desc' }, skip, take: limit });
@@ -49,7 +57,10 @@ export class MessagesService {
     return { items, nextCursor };
   }
 
-  async remove(id: number): Promise<MessageEntity> {
+  async remove(id: number, userId: number): Promise<MessageEntity> {
+    const existing = await (this.prisma as any).message.findUnique({ where: { id } });
+    if (!existing) throw new Error('Message not found');
+    if (existing.senderId !== userId) throw new Error('Forbidden');
     return (this.prisma as any).message.delete({ where: { id } });
   }
 

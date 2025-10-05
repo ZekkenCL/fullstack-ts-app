@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import { ReactionChip } from '../components/reactions/ReactionChip';
+import { ReactionPicker } from '../components/reactions/ReactionPicker';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
@@ -16,21 +18,22 @@ export default function ChannelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
-  const { messages, sendMessage, resendMessage, addReaction, removeReaction } = useChannel(activeChannelId);
+  const { messages, sendMessage, resendMessage, addReaction, removeReaction, editMessage, deleteMessage } = useChannel(activeChannelId);
   const msgStore = useMessagesStore();
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const presence = useChannelPresence(activeChannelId);
-  const currentUserId = useMemo(() => {
-    if (!user?.username) return undefined;
-    const me = presence.find(p => p.username === user.username);
-    return me?.userId;
-  }, [presence, user?.username]);
+  const currentUserId = user?.id; // ahora viene del auth store
+
+  // TODO: Próximo paso: componente ReactionPicker flotante y tooltips de usuarios que reaccionaron
   const { typingUsers, emitTyping } = useTyping(activeChannelId);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [newSince, setNewSince] = useState(0);
+  const [picker, setPicker] = useState<{ x: number; y: number; messageId: number } | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingText, setEditingText] = useState('');
   
   const formatTime = (iso?: string) => {
     if (!iso) return '';
@@ -44,27 +47,44 @@ export default function ChannelsPage() {
     return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
-  // Prepara estructura agrupada por día para renderizar separadores tipo Discord
-  // Pre-calculate lastRead id for active channel for "Nuevos" separator
+  // Last read id to decide "Nuevos" insertion
   const lastReadId = activeChannelId ? (msgStore.lastRead[activeChannelId] || 0) : 0;
 
-  const groupedMessages = useMemo(() => {
-    const groups: { day: string; items: any[] }[] = [];
-    let currentDay = '';
-    let bucket: any[] = [];
-    for (const m of messages) {
+  interface DayItem { type: 'day'; day: string }
+  interface NewSeparatorItem { type: 'new-separator'; key: string }
+  interface MessageItem { type: 'message'; m: any; day: string; compact: boolean }
+  type RenderItem = DayItem | NewSeparatorItem | MessageItem;
+
+  const renderItems: RenderItem[] = useMemo(() => {
+    const out: RenderItem[] = [];
+    const COMPACT_WINDOW_MS = 5 * 60 * 1000; // 5 min
+    let lastDay: string | null = null;
+    let prevMessage: any | null = null;
+    let insertedNewSep = false;
+    for (let i = 0; i < messages.length; i++) {
+      const m = messages[i];
       const day = formatDay(m.createdAt as any);
-      if (day !== currentDay) {
-        if (bucket.length) groups.push({ day: currentDay, items: bucket });
-        currentDay = day;
-        bucket = [m];
-      } else {
-        bucket.push(m);
+      if (day !== lastDay) {
+        lastDay = day;
+        out.push({ type: 'day', day });
+        prevMessage = null; // reset compaction across days
       }
+      // Determine if we must insert "Nuevos" separator BEFORE this message
+      if (!insertedNewSep && lastReadId && m.id && m.id > lastReadId) {
+        out.push({ type: 'new-separator', key: `new-${m.id}` });
+        insertedNewSep = true;
+      }
+      let compact = false;
+      if (prevMessage && prevMessage.senderId === m.senderId && prevMessage.createdAt && m.createdAt) {
+        const prevTime = new Date(prevMessage.createdAt).getTime();
+        const currTime = new Date(m.createdAt).getTime();
+        if (currTime - prevTime <= COMPACT_WINDOW_MS) compact = true;
+      }
+      out.push({ type: 'message', m, day, compact });
+      prevMessage = m;
     }
-    if (bucket.length) groups.push({ day: currentDay, items: bucket });
-    return groups;
-  }, [messages]);
+    return out;
+  }, [messages, lastReadId]);
 
   const toggleReaction = async (messageId: number, emoji: string) => {
     try {
@@ -195,6 +215,7 @@ export default function ChannelsPage() {
 
   if (!accessToken) return null;
   return (
+    <>
     <div className="h-screen w-screen flex bg-discord-bg-dark text-discord-text overflow-hidden">
       {/* Server (placeholder) sidebar */}
       <aside className="w-[70px] bg-discord-bg-alt flex flex-col items-center py-3 gap-3 border-r border-discord-border">
@@ -263,21 +284,30 @@ export default function ChannelsPage() {
               )}
               {loadingHistory && <p className="text-[10px] text-discord-text-muted">Cargando historial...</p>}
               {activeChannelId && messages.length === 0 && !loadingHistory && <p className="text-xs text-discord-text-muted">Sin mensajes aún.</p>}
-              {groupedMessages.map(group => (
-                <div key={group.day || Math.random()}>
-                  {group.day && (
-                    <div className="flex items-center my-4">
+              {renderItems.map((item, idx) => {
+                if (item.type === 'day') {
+                  return (
+                    <div key={`day-${item.day}-${idx}`} className="flex items-center my-4">
                       <div className="flex-1 h-px bg-discord-border" />
-                      <span className="mx-4 text-[11px] uppercase tracking-wide text-discord-text-muted">{group.day}</span>
+                      <span className="mx-4 text-[11px] uppercase tracking-wide text-discord-text-muted">{item.day}</span>
                       <div className="flex-1 h-px bg-discord-border" />
                     </div>
-                  )}
-                  {group.items.map((m: any, idx: number) => {
+                  );
+                }
+                if (item.type === 'new-separator') {
+                  return (
+                    <div key={item.key} className="flex items-center my-2" aria-label="Nuevos mensajes">
+                      <div className="flex-1 h-px bg-discord-danger/60" />
+                      <span className="mx-2 text-[10px] font-semibold text-discord-danger uppercase tracking-wide bg-discord-bg-alt px-2 py-0.5 rounded">Nuevos</span>
+                      <div className="flex-1 h-px bg-discord-danger/60" />
+                    </div>
+                  );
+                }
+                const { m, compact } = item;
                     const statusClass = m.status === 'pending' ? 'opacity-50' : m.status === 'failed' ? 'text-discord-danger' : '';
                     const rawUsername = (m as any).username ?? (typeof m.senderId !== 'undefined' ? `user-${m.senderId}` : 'yo');
                     const username = String(rawUsername);
                     const avatarInitial = (username || '?').toString().charAt(0).toUpperCase();
-                    const showNewSeparator = m.id && lastReadId && m.id > lastReadId && !group.items.some((x: any) => x.id && x.id < m.id && x.id > lastReadId) && idx === 0 && group.day === group.day; // first message in group after lastRead
                     const reactions = (m as any).reactions || [];
                     const grouped = reactions.reduce((acc: Record<string, { emoji: string; count: number; mine: boolean }>, r: any) => {
                       const k = r.emoji;
@@ -288,51 +318,83 @@ export default function ChannelsPage() {
                     }, {});
                     const reactionList: { emoji: string; count: number; mine: boolean }[] = Object.values(grouped);
                     return (
-                      <div key={m.id || m.tempId || idx} className={`group flex gap-3 items-start pr-6 ${statusClass} rounded px-2 py-1 hover:bg-discord-bg-hover/30 relative`}> 
-                        {showNewSeparator && (
-                          <div className="absolute -top-4 left-0 right-0 flex items-center" aria-label="Nuevos mensajes">
-                            <div className="flex-1 h-px bg-discord-danger/60" />
-                            <span className="mx-2 text-[10px] font-semibold text-discord-danger uppercase tracking-wide bg-discord-bg-alt px-2 py-0.5 rounded">Nuevos</span>
-                            <div className="flex-1 h-px bg-discord-danger/60" />
-                          </div>
+                      <div key={m.id || m.tempId || idx} className={`group flex items-start pr-6 ${statusClass} rounded px-2 py-0.5 hover:bg-discord-bg-hover/30 relative`}> 
+                        {!compact && (
+                          <div className="w-8 mt-1 h-8 mr-3 rounded-full bg-discord-bg-hover flex items-center justify-center text-[13px] font-semibold text-discord-text select-none shrink-0">{avatarInitial}</div>
                         )}
-                        <div className="w-8 h-8 rounded-full bg-discord-bg-hover flex items-center justify-center text-[13px] font-semibold text-discord-text select-none shrink-0">{avatarInitial}</div>
-                        <div className="flex-1 leading-snug space-y-0.5">
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-discord-text">{username}</span>
-                            {m.createdAt && <span className="text-[10px] text-discord-text-muted">{formatTime(m.createdAt as any)}</span>}
-                          </div>
-                          <div className="text-discord-text whitespace-pre-wrap break-words">
-                            {m.content}
-                            {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
-                            {m.status === 'failed' && (
-                              <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
-                                falló
-                                {m.tempId && (
-                                  <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                          {reactionList.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-1">
-                              {reactionList.map(r => (
-                                <button key={r.emoji} onClick={() => r.mine ? removeReaction(m.id!, r.emoji) : addReaction(m.id!, r.emoji)} className={`px-2 h-6 rounded-full text-[11px] flex items-center gap-1 bg-discord-bg-hover hover:bg-discord-bg-hover/80 border border-discord-border ${r.mine ? 'ring-1 ring-discord-primary/60' : ''}`}>{r.emoji}<span className="text-discord-text-muted text-[10px]">{r.count}</span></button>
-                              ))}
+                        {compact && <div className="w-8 mr-3" />}
+                        <div className={`flex-1 leading-snug ${compact ? '' : 'space-y-0.5'}`}>
+                          {!compact && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-semibold text-discord-text">{username}</span>
+                              {m.createdAt && <span className="text-[10px] text-discord-text-muted">{formatTime(m.createdAt as any)}</span>}
+                              {m.updatedAt && <span className="text-[9px] text-discord-text-muted italic">(editado)</span>}
                             </div>
                           )}
-                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1">
-                            {['👍','🔥','😂','❤️'].map(e => (
-                              <button key={e} onClick={() => addReaction(m.id!, e)} className="text-[12px] px-1 py-0.5 rounded hover:bg-discord-bg-hover/70">{e}</button>
-                            ))}
-                            {reactionList.some(r => r.mine) && <button onClick={() => reactionList.filter(r=>r.mine).forEach(r=>removeReaction(m.id!, r.emoji))} className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1">Quitar</button>}
+                          {editingId === m.id ? (
+                            <form onSubmit={e => { e.preventDefault(); if (editingText.trim()) { editMessage(m.id!, editingText.trim()); setEditingId(null); } }} className="mt-0.5">
+                              <input autoFocus value={editingText} onChange={e=>setEditingText(e.target.value)} onKeyDown={e=>{ if(e.key==='Escape'){ setEditingId(null); setEditingText(''); } }} className="w-full bg-discord-input border border-discord-border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-discord-primary/50" />
+                              <div className="flex gap-2 mt-1">
+                                <button type="submit" className="text-[10px] bg-discord-primary/70 hover:bg-discord-primary text-white px-2 py-0.5 rounded">Guardar</button>
+                                <button type="button" onClick={()=>{ setEditingId(null); setEditingText(''); }} className="text-[10px] text-discord-text-muted hover:text-discord-danger">Cancelar</button>
+                              </div>
+                            </form>
+                          ) : (
+                            <div className={`text-discord-text whitespace-pre-wrap break-words ${compact ? 'pl-0' : ''}`}>
+                              {m.content}
+                              {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
+                              {m.status === 'failed' && (
+                                <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
+                                  falló
+                                  {m.tempId && (
+                                    <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
+                                  )}
+                                </span>
+                              )}
+                            </div>
+                          )}
+                          {reactionList.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {reactionList.map(r => {
+                                // (Opcional) en el futuro podríamos mapear usuarios reales -> ahora title se arma dentro del chip con usernames almacenados si existieran
+                                return (
+                                  <ReactionChip
+                                    key={r.emoji}
+                                    emoji={r.emoji}
+                                    count={r.count}
+                                    mine={r.mine}
+                                    onClick={() => r.mine ? removeReaction(m.id!, r.emoji) : addReaction(m.id!, r.emoji)}
+                                  />
+                                );
+                              })}
+                            </div>
+                          )}
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1 items-center">
+                            <button
+                              onClick={(e) => {
+                                const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                                setPicker({ x: rect.left, y: rect.bottom + 4, messageId: m.id! });
+                              }}
+                              className="text-[11px] px-2 h-6 rounded-full bg-discord-bg-hover hover:bg-discord-bg-hover/70 border border-discord-border"
+                              title="Agregar reacción"
+                            >➕</button>
+                            {m.id && m.senderId && user?.id === m.senderId && editingId !== m.id && (
+                              <>
+                                <button onClick={() => { setEditingId(m.id!); setEditingText(m.content || ''); }} className="text-[10px] text-discord-text-muted hover:text-discord-text px-1" title="Editar">Editar</button>
+                                <button onClick={() => { if(confirm('Eliminar mensaje?')) deleteMessage(m.id!); }} className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1" title="Eliminar">Eliminar</button>
+                              </>
+                            )}
+                            {reactionList.some(r => r.mine) && (
+                              <button
+                                onClick={() => reactionList.filter(r=>r.mine).forEach(r=>removeReaction(m.id!, r.emoji))}
+                                className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1"
+                              >Quitar</button>
+                            )}
                           </div>
                         </div>
                       </div>
                     );
-                  })}
-                </div>
-              ))}
+              })}
               {!autoScroll && newSince > 0 && (
                 <button onClick={scrollToBottom} className="sticky bottom-2 ml-auto bg-discord-primary hover:bg-discord-primary/90 text-white text-xs px-3 py-1 rounded shadow">
                   {newSince} nuevo{newSince>1?'s':''} ↓
@@ -355,5 +417,14 @@ export default function ChannelsPage() {
         </div>
       </div>
     </div>
+    {picker && (
+      <ReactionPicker
+        x={picker.x}
+        y={picker.y}
+        onSelect={(emoji) => { if (picker) addReaction(picker.messageId, emoji); }}
+        onClose={() => setPicker(null)}
+      />
+    )}
+    </>
   );
 }
