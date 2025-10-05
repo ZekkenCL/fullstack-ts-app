@@ -10,7 +10,8 @@ test.describe('Chat basic flow', () => {
   test('register, create channel, send & receive messages, unread badge', async ({ page }) => {
     const userA = uniqueUser();
     const userB = uniqueUser();
-    const channelName = `ch-${Date.now().toString(36).slice(-4)}`;
+  const channelName = `ch-${Date.now().toString(36).slice(-4)}`;
+  const otherChannel = `ch-${(Date.now()+1).toString(36).slice(-4)}`;
 
     // Register first user (auto logged in)
     await page.goto('/register');
@@ -25,11 +26,16 @@ test.describe('Chat basic flow', () => {
   // Click channel list item (exact match to avoid substring collisions)
   await page.getByRole('button', { name: channelName, exact: true }).click();
 
-    // Send a message
+  // Send a message
     const firstMessage = 'Hola desde A';
     await page.getByPlaceholder('Escribe un mensaje').fill(firstMessage);
     await page.getByRole('button', { name: 'Enviar' }).click();
     await expect(page.getByText(firstMessage)).toBeVisible();
+
+  // Create a second channel and switch to it so new messages in the first channel become unread
+  await page.getByPlaceholder('Nuevo canal').fill(otherChannel);
+  await page.getByRole('button', { name: 'Crear' }).click();
+  await page.getByRole('button', { name: otherChannel, exact: true }).click();
 
     // Open new context for user B
     const pageB = await page.context().newPage();
@@ -48,12 +54,12 @@ test.describe('Chat basic flow', () => {
     await pageB.getByRole('button', { name: 'Enviar' }).click();
     await expect(pageB.getByText(reply)).toBeVisible();
 
-    // Switch back to user A page: ensure unread badge appears on list before selecting
+  // Switch back to user A page: ensure unread badge appears on list before selecting
     await page.bringToFront();
 
-    // Wait for badge (1 unread)
-  const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: channelName, exact: true }) }).locator('span', { hasText: '1' });
-    await expect(unreadBadge).toBeVisible();
+  // Wait for badge (1 unread)
+  const unreadBadge = page.locator('li', { has: page.getByRole('button', { name: channelName, exact: true }) }).locator('span').filter({ hasText: '1' });
+  await expect(unreadBadge).toBeVisible();
 
     // Re-select channel to mark read
   await page.getByRole('button', { name: channelName, exact: true }).click();
