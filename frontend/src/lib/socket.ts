@@ -113,6 +113,7 @@ export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
   const msgStore = useMessagesStore();
   const timersRef = useRef<Record<string, any>>({});
+  const currentChannelRef = useRef<number | null>(null);
   const FAILURE_TIMEOUT = 5000; // ms
   // hydrate from cache when channel changes
   useEffect(() => {
@@ -121,12 +122,11 @@ export function useChannel(channelId: number | null) {
       if (cached) setMessages(cached as ChannelMessage[]);
     }
   }, [channelId, msgStore.byChannel]);
+  // Single subscription for all messages (mounted once)
   useEffect(() => {
-    if (!channelId) return;
-    socketManager.joinChannel(channelId);
     const off = socketManager.on('messageReceived', (msg: any) => {
-      // Active channel: perform optimistic reconciliation
-      if (msg.channelId === channelId) {
+      const activeId = currentChannelRef.current;
+      if (msg.channelId === activeId) {
         setMessages(prev => {
           const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
           if (idx !== -1) {
@@ -137,22 +137,26 @@ export function useChannel(channelId: number | null) {
               clearTimeout(timersRef.current[tempId]);
               delete timersRef.current[tempId];
             }
-            if (channelId) msgStore.setChannel(channelId, clone as ChannelMessage[]);
+            if (activeId) msgStore.setChannel(activeId, clone as ChannelMessage[]);
             return clone;
           }
           const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
-          if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+          if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
           return next;
         });
-        // mark read automatically for active channel (scroll logic will adjust lastRead id); optional skip here
-        return;
+      } else {
+        const existing = msgStore.byChannel[msg.channelId] || [];
+        msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
+        msgStore.recomputeUnread(msg.channelId);
       }
-      // Inactive channel: store message and recompute unread count
-      const existing = msgStore.byChannel[msg.channelId] || [];
-      msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
-      msgStore.recomputeUnread(msg.channelId);
     });
     return () => { off(); };
+  }, []);
+
+  // Track current channel id ref & join channel on change
+  useEffect(() => {
+    currentChannelRef.current = channelId;
+    if (channelId) socketManager.joinChannel(channelId);
   }, [channelId]);
 
   const sendMessage = useCallback((content: string) => {
