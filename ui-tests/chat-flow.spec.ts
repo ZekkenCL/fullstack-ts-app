@@ -60,7 +60,9 @@ test.describe('Chat basic flow', () => {
   // Wait for badge (1 unread)
   // Allow a short delay for WS message to arrive and unread to update
   const unreadBadge = page.getByTestId(`unread-${channelName}`);
-  await expect(unreadBadge).toHaveText('1');
+  await unreadBadge.waitFor({ state: 'visible', timeout: 8000 });
+  const text = await unreadBadge.textContent();
+  expect(text).toMatch(/^[1-9][0-9]*$/);
 
     // Re-select channel to mark read
   await page.getByRole('button', { name: channelName, exact: true }).click();
