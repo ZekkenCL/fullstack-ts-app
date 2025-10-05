@@ -26,14 +26,16 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-gray-100 p-4">
-      <form onSubmit={submit} className="w-full max-w-sm bg-white shadow rounded p-6 space-y-4">
-        <h1 className="text-xl font-semibold">Login</h1>
-        {error && <p className="text-sm text-red-600">{error}</p>}
-  <input className="w-full border px-3 py-2 rounded" placeholder="Username" value={username} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setUsername(e.target.value)} />
-  <input className="w-full border px-3 py-2 rounded" placeholder="Password" type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setPassword(e.target.value)} />
-        <button className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded">Entrar</button>
-        <p className="text-sm text-gray-600">¿No tienes cuenta? <Link className="text-blue-600" href="/register">Crear cuenta</Link></p>
+    <div className="flex items-center justify-center min-h-screen bg-discord-bg-dark p-4 text-discord-text">
+      <form onSubmit={submit} className="w-full max-w-sm bg-discord-background shadow-inner-sm border border-discord-border rounded-lg p-6 space-y-4">
+        <h1 className="text-xl font-semibold text-center">Iniciar sesión</h1>
+        {error && <p className="text-sm text-discord-danger text-center">{error}</p>}
+        <div className="space-y-3">
+          <input className="w-full bg-discord-input border border-discord-border focus:border-discord-primary/60 focus:ring-2 focus:ring-discord-primary/30 outline-none px-3 py-2 rounded text-sm" placeholder="Usuario" value={username} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setUsername(e.target.value)} />
+          <input className="w-full bg-discord-input border border-discord-border focus:border-discord-primary/60 focus:ring-2 focus:ring-discord-primary/30 outline-none px-3 py-2 rounded text-sm" placeholder="Contraseña" type="password" value={password} onChange={(e: React.ChangeEvent<HTMLInputElement>)=>setPassword(e.target.value)} />
+        </div>
+        <button className="w-full bg-discord-primary hover:bg-discord-primary/90 text-white py-2 rounded text-sm font-medium">Entrar</button>
+        <p className="text-xs text-discord-text-muted text-center">¿No tienes cuenta? <Link className="text-discord-primary hover:underline" href="/register">Crear cuenta</Link></p>
       </form>
     </div>
   );

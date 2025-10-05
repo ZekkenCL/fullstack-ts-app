@@ -67,6 +67,8 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
   async handleSendMessage(@ConnectedSocket() client: Socket, @MessageBody() payload: SendMessagePayload) {
     this.metrics.incrementWsEvent('sendMessage');
     const user = (client as any).user;
+    // Debug temporal
+    if (!user) console.warn('[WS] sendMessage sin user en socket');
     if (!user?.id) {
       client.emit('error', { message: 'Unauthenticated socket' });
       this.metrics.recordWsError('sendMessage', 'unauthenticated');
@@ -103,6 +105,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     try {
       await this.channelsService.assertMember(payload.channelId, user.id);
     } catch (e) {
+      console.warn('[WS] Not member channelId=', payload.channelId, 'user=', user?.id);
       client.emit('error', { message: 'Not a channel member' });
       this.metrics.recordWsError('sendMessage', 'not_member');
       return;
@@ -119,7 +122,11 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
         this.metrics.observeClientRoundTrip(rttSeconds);
       }
     }
+    // Emit to channel room (other miembros que ya se unieron)
     this.server.to(room).emit('messageReceived', enriched);
+    if (!(client.rooms as Set<string>).has(room)) client.emit('messageReceived', enriched);
+    // También emitir un ack directo (evento separado) para que el cliente pueda reconciliar sin depender del broadcast
+    client.emit('messageAck', enriched);
   }
 
   @SubscribeMessage('typing')

@@ -31,14 +31,18 @@ export class SocketAdapter extends IoAdapter {
       server = super.createIOServer(port, finalOptions);
     }
 
-  server.use((socket: AuthenticatedSocket, next: (err?: any) => void) => {
+    server.use((socket: AuthenticatedSocket, next: (err?: any) => void) => {
       try {
-        // Token can come via query (?token=) or header 'authorization: Bearer <>'
+        // Token puede venir en: query (?token=), header Authorization o handshake.auth.token (forma recomendada en Socket.IO v4)
         const { token } = socket.handshake.query as { token?: string };
         let raw = token;
         const authHeader = socket.handshake.headers['authorization'];
         if (!raw && typeof authHeader === 'string' && authHeader.toLowerCase().startsWith('bearer ')) {
           raw = authHeader.substring(7);
+        }
+        const authObj: any = (socket.handshake as any).auth;
+        if (!raw && authObj && typeof authObj === 'object' && authObj.token) {
+          raw = authObj.token;
         }
         if (!raw) throw new UnauthorizedException('Missing token');
         const payload = this.jwtService.verify<JwtPayload>(raw);

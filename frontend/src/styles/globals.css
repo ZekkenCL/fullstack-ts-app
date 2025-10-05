@@ -8,11 +8,17 @@ html {
 
 body {
   margin: 0;
-  font-family: 'Inter', sans-serif;
-  line-height: 1.5;
-  background-color: #f9fafb; /* Light gray background */
-  color: #111827; /* Dark gray text */
+  font-family: 'Inter', system-ui, sans-serif;
+  line-height: 1.4;
+  background-color: #1e1f22; /* discord dark */
+  color: #dbdee1;
+  -webkit-font-smoothing: antialiased;
 }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2b2d31; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #3c3f45; }
 
 a {
   color: #3b82f6; /* Blue links */

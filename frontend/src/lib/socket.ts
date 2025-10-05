@@ -124,10 +124,12 @@ export function useChannel(channelId: number | null) {
   }, [channelId, msgStore.byChannel]);
   // Single subscription for all messages (mounted once)
   useEffect(() => {
-    const off = socketManager.on('messageReceived', (msg: any) => {
+    const offReceived = socketManager.on('messageReceived', (msg: any) => {
       const activeId = currentChannelRef.current;
       if (msg.channelId === activeId) {
         setMessages(prev => {
+          // Guardar contra duplicados (puede llegar duplicado si emitimos directo + room)
+          if (msg.id && prev.some(p => p.id === msg.id)) return prev;
           const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
           if (idx !== -1) {
             const clone = [...prev];
@@ -149,11 +151,30 @@ export function useChannel(channelId: number | null) {
         });
       } else {
         const existing = msgStore.byChannel[msg.channelId] || [];
-        msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
+        if (!existing.some(e => e.id === msg.id)) {
+          msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
+        }
         msgStore.incrementUnread(msg.channelId);
       }
     });
-    return () => { off(); };
+    // Ack directo (si llega antes que el broadcast) para reconciliar más rápido
+    const offAck = socketManager.on('messageAck', (msg: any) => {
+      const activeId = currentChannelRef.current;
+      if (msg.channelId !== activeId) return;
+      setMessages(prev => {
+        const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
+        if (idx === -1) return prev;
+        if (msg.id && prev.some(p => p.id === msg.id)) return prev; // ya reconciliado por broadcast
+        const clone = [...prev];
+        clone[idx] = { ...clone[idx], ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage;
+        const tempId = clone[idx].tempId;
+        if (tempId && timersRef.current[tempId]) { clearTimeout(timersRef.current[tempId]); delete timersRef.current[tempId]; }
+        if (activeId) msgStore.setChannel(activeId, clone as ChannelMessage[]);
+        if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
+        return clone;
+      });
+    });
+    return () => { offReceived(); offAck(); };
   }, []);
 
   // Track current channel id ref & join channel on change
