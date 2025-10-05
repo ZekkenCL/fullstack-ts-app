@@ -100,20 +100,42 @@ class SocketManager {
 export const socketManager = new SocketManager();
 
 // Simple hook for channel messages (replaces previous useChannel)
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 
 export interface ChannelMessage {
-  id?: number; content?: string; senderId?: number; channelId?: number; createdAt?: string; raw?: any;
+  id?: number;
+  tempId?: string;
+  content?: string;
+  senderId?: number;
+  channelId?: number;
+  createdAt?: string;
+  raw?: any;
+  status?: 'pending' | 'sent' | 'failed';
 }
 
 export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
+  const timersRef = useRef<Record<string, any>>({});
+  const FAILURE_TIMEOUT = 5000; // ms
   useEffect(() => {
     if (!channelId) return;
     socketManager.joinChannel(channelId);
     const off = socketManager.on('messageReceived', (msg: any) => {
       if (msg.channelId === channelId) {
-        setMessages(prev => [...prev, { ...msg, raw: msg }]);
+        setMessages(prev => {
+          const idx = prev.findIndex(m => m.status === 'pending' && !m.id && m.content === msg.content);
+          if (idx !== -1) {
+            const clone = [...prev];
+            clone[idx] = { ...clone[idx], ...msg, raw: msg, id: msg.id, status: 'sent' };
+            const tempId = clone[idx].tempId;
+            if (tempId && timersRef.current[tempId]) {
+              clearTimeout(timersRef.current[tempId]);
+              delete timersRef.current[tempId];
+            }
+            return clone;
+          }
+            return [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' }];
+        });
       }
     });
     return () => { off(); };
@@ -121,10 +143,34 @@ export function useChannel(channelId: number | null) {
 
   const sendMessage = useCallback((content: string) => {
     if (!channelId) return;
+    const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    setMessages(prev => [...prev, { tempId, content, channelId, status: 'pending' }]);
     socketManager.emit('sendMessage', { channelId, content });
+    timersRef.current[tempId] = setTimeout(() => {
+      setMessages(prev => prev.map(m => m.tempId === tempId && !m.id && m.status === 'pending' ? { ...m, status: 'failed' } : m));
+      delete timersRef.current[tempId];
+    }, FAILURE_TIMEOUT);
   }, [channelId]);
 
-  return { messages, sendMessage };
+  const resendMessage = useCallback((tempId: string) => {
+    setMessages(prev => {
+      const idx = prev.findIndex(m => m.tempId === tempId && m.status === 'failed');
+      if (idx === -1) return prev;
+      const clone = [...prev];
+      const original = clone[idx];
+      const newTemp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      clone[idx] = { ...original, tempId: newTemp, status: 'pending' };
+      // emit again
+      socketManager.emit('sendMessage', { channelId, content: original.content });
+      timersRef.current[newTemp] = setTimeout(() => {
+        setMessages(p => p.map(m => m.tempId === newTemp && !m.id && m.status === 'pending' ? { ...m, status: 'failed' } : m));
+        delete timersRef.current[newTemp];
+      }, FAILURE_TIMEOUT);
+      return clone;
+    });
+  }, [channelId]);
+
+  return { messages, sendMessage, resendMessage };
 }
 
 // Presence hook: listens to channelPresence events and filters by channelId

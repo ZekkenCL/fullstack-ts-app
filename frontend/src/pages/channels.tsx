@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
@@ -14,9 +14,37 @@ export default function ChannelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
-  const { messages, sendMessage } = useChannel(activeChannelId);
+  const { messages, sendMessage, resendMessage } = useChannel(activeChannelId);
   const presence = useChannelPresence(activeChannelId);
   const [draft, setDraft] = useState('');
+  const listRef = useRef<HTMLDivElement | null>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const [newSince, setNewSince] = useState(0);
+
+  const onScroll = () => {
+    if (!listRef.current) return;
+    const el = listRef.current;
+    const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 40;
+    setAutoScroll(atBottom);
+    if (atBottom) setNewSince(0);
+  };
+
+  useEffect(() => {
+    if (!listRef.current) return;
+    if (autoScroll) {
+      listRef.current.scrollTop = listRef.current.scrollHeight;
+    } else {
+      setNewSince(prev => prev + 1);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages.length]);
+
+  const scrollToBottom = () => {
+    if (!listRef.current) return;
+    listRef.current.scrollTop = listRef.current.scrollHeight;
+    setAutoScroll(true);
+    setNewSince(0);
+  };
 
   useEffect(() => {
     if (!accessToken) {
@@ -89,7 +117,7 @@ export default function ChannelsPage() {
                   <span>Canal #{activeChannelId}</span>
                   <span className="text-xs text-gray-500">{presence.length} conectados</span>
                 </div>
-                <div className="flex-1 overflow-auto px-4 py-3 space-y-2">
+                <div className="flex-1 overflow-auto px-4 py-3 space-y-2 relative" ref={listRef} onScroll={onScroll}>
                   {presence.length > 0 && (
                     <div className="mb-2 pb-2 border-b">
                       <p className="text-[11px] uppercase tracking-wide text-gray-500 mb-1">Presencia</p>
@@ -101,9 +129,28 @@ export default function ChannelsPage() {
                     </div>
                   )}
                   {messages.length === 0 && <p className="text-xs text-gray-500">Sin mensajes aún.</p>}
-                  {messages.map((m, idx) => (
-                    <div key={m.id || idx} className="text-sm"><span className="text-gray-600">{m.senderId || '¿'}</span>: {m.content}</div>
-                  ))}
+                  {messages.map((m, idx) => {
+                    const statusClass = m.status === 'pending' ? 'opacity-60 italic' : m.status === 'failed' ? 'text-red-600' : '';
+                    return (
+                      <div key={m.id || m.tempId || idx} className={`text-sm ${statusClass}`}>
+                        <span className="text-gray-600">{m.senderId || 'yo'}</span>: {m.content}
+                        {m.status === 'pending' && <span className="ml-2 text-xs text-gray-400">(enviando)</span>}
+                        {m.status === 'failed' && (
+                          <span className="ml-2 text-xs flex items-center gap-2">
+                            (falló)
+                            {m.tempId && (
+                              <button onClick={() => resendMessage(m.tempId!)} className="text-blue-600 underline">reintentar</button>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {!autoScroll && newSince > 0 && (
+                    <button onClick={scrollToBottom} className="absolute bottom-2 right-2 bg-blue-600 text-white text-xs px-3 py-1 rounded shadow">
+                      {newSince} nuevo{newSince>1?'s':''} ↓
+                    </button>
+                  )}
                 </div>
                 <div className="border-t p-2 flex gap-2">
                   <input value={draft} onChange={(e)=>setDraft(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); } }} className="flex-1 border px-3 py-2 rounded" placeholder="Escribe un mensaje" />
