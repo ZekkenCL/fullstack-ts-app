@@ -1,5 +1,5 @@
 import { IoAdapter } from '@nestjs/platform-socket.io';
-import { ServerOptions, Socket } from 'socket.io';
+import { Server, ServerOptions, Socket } from 'socket.io';
 import { JwtService } from '@nestjs/jwt';
 import { INestApplication, UnauthorizedException } from '@nestjs/common';
 import { JwtPayload } from '../auth/jwt-payload.interface';
@@ -16,11 +16,20 @@ export class SocketAdapter extends IoAdapter {
     this.jwtService = this.app.get(JwtService);
   }
 
-  createIOServer(port: number, options?: ServerOptions) {
-    const server = super.createIOServer(port, {
+  createIOServer(port: number, options?: ServerOptions & { httpServer?: any }) {
+    // If Nest provides an existing httpServer (standard in hybrid apps), attach Socket.IO to it
+    const httpServer = (options as any)?.httpServer;
+    const finalOptions: Partial<ServerOptions> = {
       cors: { origin: '*', methods: ['GET', 'POST'] },
       ...options,
-    });
+    };
+    let server: Server;
+    if (httpServer) {
+      server = new Server(httpServer, finalOptions);
+    } else {
+      // Fallback to default behavior (standalone port) using parent implementation
+      server = super.createIOServer(port, finalOptions);
+    }
 
   server.use((socket: AuthenticatedSocket, next: (err?: any) => void) => {
       try {
