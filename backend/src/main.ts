@@ -23,11 +23,30 @@ import { logger } from './common/logging/logger';
 import { SocketAdapter } from './realtime/socket.adapter';
 import { validateEnv } from './config/env.validation';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
 
 async function bootstrap() {
   // Validate environment early (fail-fast)
   validateEnv(process.env);
   const app = await NestFactory.create(AppModule);
+  // Seguridad HTTP
+  app.use(helmet({
+    crossOriginEmbedderPolicy: false, // compatibilidad si usas iframes o CDNs
+    contentSecurityPolicy: process.env.NODE_ENV === 'production' ? undefined : false,
+  }));
+
+  const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000').split(',').map(o => o.trim());
+  app.enableCors({
+    origin: (origin, callback) => {
+      if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+      return callback(new Error('Not allowed by CORS'));
+    },
+    credentials: true,
+    methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
+    allowedHeaders: 'Authorization,Content-Type,Accept',
+    exposedHeaders: 'Content-Length,Content-Type',
+    maxAge: 600,
+  });
   app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true }));
   const loggerInterceptor = app.get(RequestLoggerInterceptor);
   const metricsInterceptor = app.get(RequestMetricsInterceptor);

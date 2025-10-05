@@ -1,17 +1,30 @@
 // Simple fetch wrapper with automatic JSON, auth header and refresh flow placeholder.
 import { getAuthStore } from '../store/authStore';
+import { getUIStore } from '../store/uiStore';
+
+// Custom API error with HTTP status and optional payload
+export class ApiError extends Error {
+  status: number;
+  body: any;
+  code?: string;
+  constructor(status: number, message: string, body?: any, code?: string) {
+    super(message);
+    this.status = status;
+    this.body = body;
+    this.code = code;
+  }
+}
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000';
 
-async function refreshToken(): Promise<boolean> {
-  const store = getAuthStore();
-  const refreshToken = store.getState().refreshToken;
-  if (!refreshToken) return false;
+let refreshInFlight: Promise<boolean> | null = null;
+
+async function performRefresh(currentRefresh: string, store: ReturnType<typeof getAuthStore>): Promise<boolean> {
   try {
     const res = await fetch(BASE_URL + '/auth/refresh', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refreshToken }),
+      body: JSON.stringify({ refreshToken: currentRefresh }),
     });
     if (!res.ok) return false;
     const data = await res.json();
@@ -22,27 +35,84 @@ async function refreshToken(): Promise<boolean> {
   }
 }
 
+async function refreshToken(): Promise<boolean> {
+  const store = getAuthStore();
+  const rt = store.getState().refreshToken;
+  if (!rt) return false;
+  if (refreshInFlight) return refreshInFlight;
+  refreshInFlight = (async () => {
+    const ok = await performRefresh(rt, store);
+    refreshInFlight = null;
+    return ok;
+  })();
+  return refreshInFlight;
+}
+
+// Central logout with redirect (client-side only)
+export function forceLogout() {
+  const store = getAuthStore();
+  store.getState().clear();
+  if (typeof window !== 'undefined') {
+    try { localStorage.removeItem('auth-store'); } catch {}
+    if (window.location.pathname !== '/login') window.location.assign('/login');
+  }
+}
+
+async function parseError(res: Response): Promise<ApiError> {
+  let body: any = null; let message = 'Request failed'; let code: string | undefined;
+  const ct = res.headers.get('content-type') || '';
+  try {
+    if (ct.includes('application/json')) {
+      body = await res.json();
+      message = body.message || body.error || message;
+      code = body.code;
+    } else {
+      const text = await res.text();
+      body = text;
+      message = text || message;
+    }
+  } catch {
+    // swallow parse errors
+  }
+  return new ApiError(res.status, message, body, code);
+}
+
 export async function apiRequest<T = any>(path: string, options: RequestInit & { auth?: boolean } = {}): Promise<T> {
   const store = getAuthStore();
   const { accessToken } = store.getState();
   const headers: Record<string,string> = { 'Content-Type': 'application/json', ...(options.headers as any) };
   if (options.auth && accessToken) headers.Authorization = `Bearer ${accessToken}`;
-  const res = await fetch(BASE_URL + path, { ...options, headers });
+
+  const attempt = async (h: Record<string,string>): Promise<Response> => {
+    return fetch(BASE_URL + path, { ...options, headers: h });
+  };
+
+  let res = await attempt(headers);
+
   if (res.status === 401 && options.auth) {
     const refreshed = await refreshToken();
     if (refreshed) {
       const newAccess = store.getState().accessToken;
       const retryHeaders = { ...headers, Authorization: `Bearer ${newAccess}` };
-      const retry = await fetch(BASE_URL + path, { ...options, headers: retryHeaders });
-      if (!retry.ok) throw new Error(await retry.text());
-      return retry.json();
+      res = await attempt(retryHeaders);
+    } else {
+      forceLogout();
+      throw new ApiError(401, 'Sesión expirada');
     }
   }
+
   if (!res.ok) {
-    throw new Error(await res.text());
+    const err = await parseError(res);
+    if (err.status !== 401) {
+      try { getUIStore().getState().push({ type: 'error', message: err.message }); } catch {}
+    }
+    throw err;
   }
   if (res.status === 204) return undefined as any;
-  return res.json();
+  const ct = res.headers.get('content-type') || '';
+  if (ct.includes('application/json')) return res.json();
+  // Fallback to text for non-json
+  return (await res.text()) as any;
 }
 
 export const api = {
