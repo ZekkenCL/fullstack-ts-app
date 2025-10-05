@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
@@ -16,16 +16,61 @@ export default function ChannelsPage() {
   const [error, setError] = useState<string | null>(null);
   const [newName, setNewName] = useState('');
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
-  const { messages, sendMessage, resendMessage } = useChannel(activeChannelId);
+  const { messages, sendMessage, resendMessage, addReaction, removeReaction } = useChannel(activeChannelId);
   const msgStore = useMessagesStore();
   const [historyCursor, setHistoryCursor] = useState<number | null>(null);
   const [loadingHistory, setLoadingHistory] = useState(false);
   const presence = useChannelPresence(activeChannelId);
+  const currentUserId = useMemo(() => {
+    if (!user?.username) return undefined;
+    const me = presence.find(p => p.username === user.username);
+    return me?.userId;
+  }, [presence, user?.username]);
   const { typingUsers, emitTyping } = useTyping(activeChannelId);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [newSince, setNewSince] = useState(0);
+  
+  const formatTime = (iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatDay = (iso?: string) => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  // Prepara estructura agrupada por día para renderizar separadores tipo Discord
+  // Pre-calculate lastRead id for active channel for "Nuevos" separator
+  const lastReadId = activeChannelId ? (msgStore.lastRead[activeChannelId] || 0) : 0;
+
+  const groupedMessages = useMemo(() => {
+    const groups: { day: string; items: any[] }[] = [];
+    let currentDay = '';
+    let bucket: any[] = [];
+    for (const m of messages) {
+      const day = formatDay(m.createdAt as any);
+      if (day !== currentDay) {
+        if (bucket.length) groups.push({ day: currentDay, items: bucket });
+        currentDay = day;
+        bucket = [m];
+      } else {
+        bucket.push(m);
+      }
+    }
+    if (bucket.length) groups.push({ day: currentDay, items: bucket });
+    return groups;
+  }, [messages]);
+
+  const toggleReaction = async (messageId: number, emoji: string) => {
+    try {
+      await fetch(`/messages/${messageId}/reactions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ emoji }) });
+    } catch {}
+  };
 
   const onScroll = async () => {
     if (!listRef.current) return;
@@ -218,26 +263,76 @@ export default function ChannelsPage() {
               )}
               {loadingHistory && <p className="text-[10px] text-discord-text-muted">Cargando historial...</p>}
               {activeChannelId && messages.length === 0 && !loadingHistory && <p className="text-xs text-discord-text-muted">Sin mensajes aún.</p>}
-              {messages.map((m, idx) => {
-                const statusClass = m.status === 'pending' ? 'opacity-50' : m.status === 'failed' ? 'text-discord-danger' : '';
-                return (
-                  <div key={m.id || m.tempId || idx} className={`group flex gap-2 items-start pr-6 ${statusClass} hover:bg-discord-bg-hover/40 rounded px-2 py-1`}> 
-                    <div className="flex-1 leading-snug">
-                      <span className="font-semibold text-discord-text mr-2">{m.senderId || 'yo'}</span>
-                      <span className="text-discord-text" >{m.content}</span>
-                      {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
-                      {m.status === 'failed' && (
-                        <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
-                          falló
-                          {m.tempId && (
-                            <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
-                          )}
-                        </span>
-                      )}
+              {groupedMessages.map(group => (
+                <div key={group.day || Math.random()}>
+                  {group.day && (
+                    <div className="flex items-center my-4">
+                      <div className="flex-1 h-px bg-discord-border" />
+                      <span className="mx-4 text-[11px] uppercase tracking-wide text-discord-text-muted">{group.day}</span>
+                      <div className="flex-1 h-px bg-discord-border" />
                     </div>
-                  </div>
-                );
-              })}
+                  )}
+                  {group.items.map((m: any, idx: number) => {
+                    const statusClass = m.status === 'pending' ? 'opacity-50' : m.status === 'failed' ? 'text-discord-danger' : '';
+                    const rawUsername = (m as any).username ?? (typeof m.senderId !== 'undefined' ? `user-${m.senderId}` : 'yo');
+                    const username = String(rawUsername);
+                    const avatarInitial = (username || '?').toString().charAt(0).toUpperCase();
+                    const showNewSeparator = m.id && lastReadId && m.id > lastReadId && !group.items.some((x: any) => x.id && x.id < m.id && x.id > lastReadId) && idx === 0 && group.day === group.day; // first message in group after lastRead
+                    const reactions = (m as any).reactions || [];
+                    const grouped = reactions.reduce((acc: Record<string, { emoji: string; count: number; mine: boolean }>, r: any) => {
+                      const k = r.emoji;
+                      if (!acc[k]) acc[k] = { emoji: k, count: 0, mine: r.userId === currentUserId };
+                      acc[k].count++;
+                      if (r.userId === currentUserId) acc[k].mine = true;
+                      return acc;
+                    }, {});
+                    const reactionList: { emoji: string; count: number; mine: boolean }[] = Object.values(grouped);
+                    return (
+                      <div key={m.id || m.tempId || idx} className={`group flex gap-3 items-start pr-6 ${statusClass} rounded px-2 py-1 hover:bg-discord-bg-hover/30 relative`}> 
+                        {showNewSeparator && (
+                          <div className="absolute -top-4 left-0 right-0 flex items-center" aria-label="Nuevos mensajes">
+                            <div className="flex-1 h-px bg-discord-danger/60" />
+                            <span className="mx-2 text-[10px] font-semibold text-discord-danger uppercase tracking-wide bg-discord-bg-alt px-2 py-0.5 rounded">Nuevos</span>
+                            <div className="flex-1 h-px bg-discord-danger/60" />
+                          </div>
+                        )}
+                        <div className="w-8 h-8 rounded-full bg-discord-bg-hover flex items-center justify-center text-[13px] font-semibold text-discord-text select-none shrink-0">{avatarInitial}</div>
+                        <div className="flex-1 leading-snug space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-discord-text">{username}</span>
+                            {m.createdAt && <span className="text-[10px] text-discord-text-muted">{formatTime(m.createdAt as any)}</span>}
+                          </div>
+                          <div className="text-discord-text whitespace-pre-wrap break-words">
+                            {m.content}
+                            {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
+                            {m.status === 'failed' && (
+                              <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
+                                falló
+                                {m.tempId && (
+                                  <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
+                                )}
+                              </span>
+                            )}
+                          </div>
+                          {reactionList.length > 0 && (
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {reactionList.map(r => (
+                                <button key={r.emoji} onClick={() => r.mine ? removeReaction(m.id!, r.emoji) : addReaction(m.id!, r.emoji)} className={`px-2 h-6 rounded-full text-[11px] flex items-center gap-1 bg-discord-bg-hover hover:bg-discord-bg-hover/80 border border-discord-border ${r.mine ? 'ring-1 ring-discord-primary/60' : ''}`}>{r.emoji}<span className="text-discord-text-muted text-[10px]">{r.count}</span></button>
+                              ))}
+                            </div>
+                          )}
+                          <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1">
+                            {['👍','🔥','😂','❤️'].map(e => (
+                              <button key={e} onClick={() => addReaction(m.id!, e)} className="text-[12px] px-1 py-0.5 rounded hover:bg-discord-bg-hover/70">{e}</button>
+                            ))}
+                            {reactionList.some(r => r.mine) && <button onClick={() => reactionList.filter(r=>r.mine).forEach(r=>removeReaction(m.id!, r.emoji))} className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1">Quitar</button>}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
               {!autoScroll && newSince > 0 && (
                 <button onClick={scrollToBottom} className="sticky bottom-2 ml-auto bg-discord-primary hover:bg-discord-primary/90 text-white text-xs px-3 py-1 rounded shadow">
                   {newSince} nuevo{newSince>1?'s':''} ↓

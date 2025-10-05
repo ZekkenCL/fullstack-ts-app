@@ -7,6 +7,7 @@ model User {
   messages           Message[]       @relation("UserMessages")
   refreshTokens      RefreshToken[]
   readStates         ChannelReadState[]
+  reactions          Reaction[]
 }
 
 model Channel {
@@ -48,9 +49,25 @@ model Message {
   content   String
   senderId  Int
   channelId Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
   sender    User     @relation("UserMessages", fields: [senderId], references: [id])
   channel   Channel  @relation("ChannelMessages", fields: [channelId], references: [id])
   readStates ChannelReadState[]
+  reactions Reaction[]
+}
+
+model Reaction {
+  id         Int      @id @default(autoincrement())
+  emoji      String
+  userId     Int
+  messageId  Int
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id])
+  message    Message  @relation(fields: [messageId], references: [id])
+
+  @@unique([userId, messageId, emoji])
+  @@index([messageId])
 }
 
 model ChannelReadState {

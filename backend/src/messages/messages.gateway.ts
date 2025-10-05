@@ -1,6 +1,7 @@
 import { WebSocketGateway, WebSocketServer, SubscribeMessage, OnGatewayInit, OnGatewayConnection, OnGatewayDisconnect, MessageBody, ConnectedSocket } from '@nestjs/websockets';
 import { Server, Socket } from 'socket.io';
 import { MessagesService } from './messages.service';
+import { ReactionsService } from './reactions.service';
 import { ChannelsService } from '../channels/channels.service';
 import { PresenceService } from '../realtime/presence.service';
 import { UseGuards } from '@nestjs/common';
@@ -24,6 +25,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     private readonly presence: PresenceService,
     private readonly channelsService: ChannelsService,
     private readonly metrics: MetricsService,
+    private readonly reactions: ReactionsService,
   ) {}
 
   afterInit(server: Server) {
@@ -115,7 +117,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const latency = (Date.now() - start) / 1000;
     this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
-    const enriched = payload.clientMsgId ? { ...message, clientMsgId: payload.clientMsgId } : message;
+  const enriched = payload.clientMsgId ? { ...message, clientMsgId: payload.clientMsgId, username: user.username } : { ...message, username: user.username };
     if (payload.clientSentAt && typeof payload.clientSentAt === 'number') {
       const rttSeconds = (Date.now() - payload.clientSentAt) / 1000;
       if (rttSeconds >= 0 && rttSeconds < 60) {
@@ -140,5 +142,25 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     } catch { return; }
     const room = `channel:${payload.channelId}`;
     this.server.to(room).emit('channelTyping', { channelId: payload.channelId, userId: user.id, username: user.username, typing: payload.typing });
+  }
+
+  @SubscribeMessage('reactionAdd')
+  async handleReactionAdd(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: number; emoji: string; channelId: number }) {
+    const user = (client as any).user;
+    if (!user?.id || !payload?.channelId || !payload?.messageId || !payload?.emoji) return;
+    try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
+    await this.reactions.addReaction(user.id, payload.messageId, payload.emoji);
+    const room = `channel:${payload.channelId}`;
+    this.server.to(room).emit('reactionUpdate', { type: 'add', messageId: payload.messageId, emoji: payload.emoji, userId: user.id });
+  }
+
+  @SubscribeMessage('reactionRemove')
+  async handleReactionRemove(@ConnectedSocket() client: Socket, @MessageBody() payload: { messageId: number; emoji: string; channelId: number }) {
+    const user = (client as any).user;
+    if (!user?.id || !payload?.channelId || !payload?.messageId || !payload?.emoji) return;
+    try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
+    await this.reactions.removeReaction(user.id, payload.messageId, payload.emoji);
+    const room = `channel:${payload.channelId}`;
+    this.server.to(room).emit('reactionUpdate', { type: 'remove', messageId: payload.messageId, emoji: payload.emoji, userId: user.id });
   }
 }

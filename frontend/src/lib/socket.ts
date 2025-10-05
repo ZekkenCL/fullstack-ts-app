@@ -111,6 +111,7 @@ export interface ChannelMessage extends UIMessage { raw?: any; id?: number; cont
 
 export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
+  const messagesRef = useRef<ChannelMessage[]>([]);
   const msgStore = useMessagesStore();
   const timersRef = useRef<Record<string, any>>({});
   const currentChannelRef = useRef<number | null>(null);
@@ -124,7 +125,7 @@ export function useChannel(channelId: number | null) {
   }, [channelId, msgStore.byChannel]);
   // Single subscription for all messages (mounted once)
   useEffect(() => {
-    const offReceived = socketManager.on('messageReceived', (msg: any) => {
+  const offReceived = socketManager.on('messageReceived', (msg: any) => {
       const activeId = currentChannelRef.current;
       if (msg.channelId === activeId) {
         setMessages(prev => {
@@ -142,11 +143,13 @@ export function useChannel(channelId: number | null) {
             if (activeId) msgStore.setChannel(activeId, clone as ChannelMessage[]);
             // Ensure lastRead advances now that we have the real id
             if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
+            messagesRef.current = clone as ChannelMessage[];
             return clone;
           }
           const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
           if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
           if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
+          messagesRef.current = next as ChannelMessage[];
           return next;
         });
       } else {
@@ -158,7 +161,7 @@ export function useChannel(channelId: number | null) {
       }
     });
     // Ack directo (si llega antes que el broadcast) para reconciliar más rápido
-    const offAck = socketManager.on('messageAck', (msg: any) => {
+  const offAck = socketManager.on('messageAck', (msg: any) => {
       const activeId = currentChannelRef.current;
       if (msg.channelId !== activeId) return;
       setMessages(prev => {
@@ -171,10 +174,29 @@ export function useChannel(channelId: number | null) {
         if (tempId && timersRef.current[tempId]) { clearTimeout(timersRef.current[tempId]); delete timersRef.current[tempId]; }
         if (activeId) msgStore.setChannel(activeId, clone as ChannelMessage[]);
         if (activeId && msg.id) msgStore.markRead(activeId, msg.id);
+        messagesRef.current = clone as ChannelMessage[];
         return clone;
       });
     });
-    return () => { offReceived(); offAck(); };
+    const offReaction = socketManager.on('reactionUpdate', (evt: any) => {
+      const activeId = currentChannelRef.current;
+      setMessages(prev => {
+        const updated = prev.map(m => {
+        if (m.id !== evt.messageId) return m;
+        const existing = (m as any).reactions || [];
+        if (evt.type === 'add') {
+          if (existing.some((r: any) => r.emoji === evt.emoji && r.userId === evt.userId)) return m;
+          return { ...m, reactions: [...existing, { emoji: evt.emoji, userId: evt.userId }] };
+        } else {
+          return { ...m, reactions: existing.filter((r: any) => !(r.emoji === evt.emoji && r.userId === evt.userId)) };
+        }
+        });
+        messagesRef.current = updated as ChannelMessage[];
+        if (activeId) msgStore.setChannel(activeId, updated as ChannelMessage[]);
+        return updated;
+      });
+    });
+    return () => { offReceived(); offAck(); offReaction(); };
   }, []);
 
   // Track current channel id ref & join channel on change
@@ -186,8 +208,9 @@ export function useChannel(channelId: number | null) {
   const sendMessage = useCallback((content: string) => {
     if (!channelId) return;
   const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+  const authUser = getAuthStore().getState().user;
     setMessages(prev => {
-      const next = [...prev, { tempId, content, channelId, status: 'pending' } as ChannelMessage];
+      const next = [...prev, { tempId, content, channelId, status: 'pending', createdAt: new Date().toISOString(), username: authUser?.username } as ChannelMessage];
       if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
       return next;
     });
@@ -209,7 +232,7 @@ export function useChannel(channelId: number | null) {
       const clone = [...prev];
       const original = clone[idx];
       const newTemp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      clone[idx] = { ...original, tempId: newTemp, status: 'pending' } as ChannelMessage;
+      clone[idx] = { ...original, tempId: newTemp, status: 'pending', createdAt: original.createdAt || new Date().toISOString() } as ChannelMessage;
       // emit again
   socketManager.emit('sendMessage', { channelId, content: original.content, clientMsgId: newTemp, clientSentAt: Date.now() });
       timersRef.current[newTemp] = setTimeout(() => {
@@ -225,7 +248,16 @@ export function useChannel(channelId: number | null) {
     });
   }, [channelId]);
 
-  return { messages, sendMessage, resendMessage };
+  const addReaction = useCallback((messageId: number, emoji: string) => {
+    if (!channelId) return;
+    socketManager.emit('reactionAdd', { channelId, messageId, emoji });
+  }, [channelId]);
+  const removeReaction = useCallback((messageId: number, emoji: string) => {
+    if (!channelId) return;
+    socketManager.emit('reactionRemove', { channelId, messageId, emoji });
+  }, [channelId]);
+
+  return { messages, sendMessage, resendMessage, addReaction, removeReaction };
 }
 
 // Presence hook: listens to channelPresence events and filters by channelId
