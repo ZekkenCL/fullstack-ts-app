@@ -78,16 +78,22 @@ describe('E2E WebSocket Messages', () => {
         socket.emit('joinChannel', { channelId });
       });
       let joined = false;
-      socket.on('joinedChannel', (p: any) => {
-        if (p?.room) joined = true;
+      let messageSent = false;
+      // log all events
+      (socket as any).onAny((event: string, ...args: any[]) => {
+        // eslint-disable-next-line no-console
+        console.log('[client onAny]', event, args?.[0]?.channelId || '', args[0]?.message || '');
       });
-      socket.on('error', (e: any) => { /* capture gateway error events */ console.error('socket event error', e); });
-      socket.on('channelPresence', async (p: any) => {
-        if (joined && p?.channelId === channelId) {
-          await new Promise(r => setTimeout(r, 50));
+      socket.on('joinedChannel', async (p: any) => {
+        if (p?.room && !messageSent) {
+          joined = true;
+          await new Promise(r => setTimeout(r, 30));
+          messageSent = true;
           socket.emit('sendMessage', { channelId, content: 'hola ws' });
         }
       });
+      socket.on('error', (e: any) => { console.error('socket event error', e); });
+      socket.on('channelPresence', async (_p: any) => { /* presence observed but we now act after joinedChannel */ });
       socket.on('messageReceived', (msg: any) => {
         try {
           expect(msg.content).toBe('hola ws');
