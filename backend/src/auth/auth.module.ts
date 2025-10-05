@@ -7,6 +7,7 @@ import { PassportModule } from '@nestjs/passport';
 import { JwtModule } from '@nestjs/jwt';
 import { UsersModule } from '../users/users.module';
 import { PrismaModule } from '../prisma/prisma.module';
+import { LoginRateLimitGuard } from './guards/login-rate-limit.guard';
 
 @Module({
   imports: [
@@ -19,7 +20,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     }),
   ],
   controllers: [AuthController],
-  providers: [AuthService, JwtStrategy, LocalStrategy],
+  providers: [AuthService, JwtStrategy, LocalStrategy, LoginRateLimitGuard],
   exports: [AuthService],
 })
 export class AuthModule {}

@@ -1,12 +1,10 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const request = require('supertest');
-import { AppModule } from '../../src/app.module';
-import { SocketAdapter } from '../../src/realtime/socket.adapter';
 import { PrismaService } from '../../src/prisma/prisma.service';
 import { resetDatabase } from './utils/db-reset';
 import { io, Socket } from 'socket.io-client';
+import { createTestingApp } from './utils/create-testing-app';
 
 /*
   WebSocket E2E:
@@ -31,20 +29,10 @@ describe('E2E WebSocket Messages', () => {
   jest.setTimeout(20000);
 
   beforeAll(async () => {
-    process.env.JWT_SECRET = 'e2e_secret';
-    if (!process.env.DATABASE_URL) {
-      process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/mydatabase?schema=public';
-    }
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-  app.useWebSocketAdapter(new SocketAdapter(app));
-  await app.init();
-  // Explicitly listen on an ephemeral port so server.address() becomes available
-  await app.listen(0);
-  prisma = app.get(PrismaService);
-  const addr = (app.getHttpServer() as any).address();
-  baseUrl = `http://localhost:${addr.port}`;
+    const created = await createTestingApp();
+    app = created.app;
+    baseUrl = created.baseUrl;
+    prisma = app.get(PrismaService);
   });
 
   afterAll(async () => {

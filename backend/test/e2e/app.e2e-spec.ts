@@ -1,10 +1,10 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const request = require('supertest');
-import { AppModule } from '../../src/app.module';
+import { createTestingApp } from './utils/create-testing-app';
 import { resetDatabase } from './utils/db-reset';
 import { PrismaService } from '../../src/prisma/prisma.service';
+import { registerUser } from './utils/test-helpers';
 
 describe('E2E Basic (Auth + Channels + Roles)', () => {
   let app: INestApplication;
@@ -25,13 +25,10 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
       // fallback to docker-compose defaults
       process.env.DATABASE_URL = 'postgresql://user:password@localhost:5432/mydatabase?schema=public';
     }
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-    await app.init();
-    // Clean DB to isolate spec
-    prisma = app.get(PrismaService);
-    await resetDatabase(prisma as any);
+  const created = await createTestingApp();
+  app = created.app;
+  prisma = app.get(PrismaService);
+  await resetDatabase(prisma as any);
     // prisma already set
   });
 
@@ -40,8 +37,8 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
   });
 
   it('register owner user', async () => {
-  const res = await request(app.getHttpServer()).post('/auth/register').send({ username: ownerUsername, password: validPassword }).expect(201);
-    accessTokenOwner = res.body.accessToken;
+    const r = await registerUser(app, ownerUsername, validPassword);
+    accessTokenOwner = r.accessToken;
     expect(accessTokenOwner).toBeDefined();
   });
 
@@ -56,8 +53,8 @@ describe('E2E Basic (Auth + Channels + Roles)', () => {
   });
 
   it('register second user', async () => {
-  const res = await request(app.getHttpServer()).post('/auth/register').send({ username: memberUsername, password: validPassword }).expect(201);
-    accessTokenMember = res.body.accessToken;
+    const r = await registerUser(app, memberUsername, validPassword);
+    accessTokenMember = r.accessToken;
   });
 
   it('member joins channel', async () => {

@@ -1,8 +1,7 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
-import { Test } from '@nestjs/testing';
+import { INestApplication } from '@nestjs/common';
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const request = require('supertest');
-import { AppModule } from '../../src/app.module';
+import { createTestingApp } from './utils/create-testing-app';
 import { resetDatabase } from './utils/db-reset';
 import { PrismaService } from '../../src/prisma/prisma.service';
 
@@ -33,11 +32,9 @@ describe('E2E Auth Refresh Rotation', () => {
     // Reduce active refresh limit for deterministic trimming test
     process.env.REFRESH_TOKEN_MAX_ACTIVE = '3';
 
-    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
-    app = moduleRef.createNestApplication();
-    app.useGlobalPipes(new ValidationPipe({ whitelist: true }));
-    await app.init();
-    prisma = app.get(PrismaService);
+  const created = await createTestingApp();
+  app = created.app;
+  prisma = app.get(PrismaService);
     await resetDatabase(prisma as any);
   });
 

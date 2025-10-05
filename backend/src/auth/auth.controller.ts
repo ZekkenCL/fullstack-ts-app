@@ -4,6 +4,7 @@ import { AuthService } from '@/auth/auth.service';
 import { AuthCredentialsDto } from '@/auth/dto/auth-credentials.dto';
 import { RefreshTokenDto } from '@/auth/dto/refresh-token.dto';
 import { JwtAuthGuard } from '@/auth/guards/jwt-auth.guard';
+import { LoginRateLimitGuard } from '@/auth/guards/login-rate-limit.guard';
 
 @ApiTags('auth')
 @Controller('auth')
@@ -17,6 +18,7 @@ export class AuthController {
     return this.authService.register(dto);
   }
 
+  @UseGuards(LoginRateLimitGuard)
   @Post('login')
   @ApiBody({ type: AuthCredentialsDto })
   @ApiOkResponse({ description: 'Login correcto. Devuelve accessToken.' })
