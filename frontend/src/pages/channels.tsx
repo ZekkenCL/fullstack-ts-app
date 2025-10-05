@@ -160,7 +160,9 @@ export default function ChannelsPage() {
             <h2 className="text-sm font-semibold text-gray-600">Lista</h2>
             <ul className="space-y-2">
               {channels.map(c => {
-                const unread = msgStore.unread[c.id] || 0;
+                const channelMessages = msgStore.byChannel[c.id] || [];
+                const lastRead = msgStore.lastRead[c.id] || 0;
+                const unread = channelMessages.filter(m => m.id && m.id > lastRead).length;
                 return (
                   <li key={c.id} className={`border bg-white rounded p-3 flex justify-between items-center ${activeChannelId===c.id ? 'ring-2 ring-blue-500' : ''}`}>
                     <button className="flex-1 text-left" onClick={() => { api.joinChannel(c.id); selectChannel(c.id); }}>{c.name}</button>
