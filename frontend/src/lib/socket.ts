@@ -1,4 +1,6 @@
 import { io, Socket } from 'socket.io-client';
+// Using relative path to shared package source to avoid build step for now
+import type { SharedMessage } from '../../../shared/src/types';
 import { getUIStore } from '../store/uiStore';
 import { getAuthStore } from '../store/authStore';
 import { forceLogout } from './apiClient';
@@ -101,40 +103,46 @@ export const socketManager = new SocketManager();
 
 // Simple hook for channel messages (replaces previous useChannel)
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useMessagesStore } from '../store/messagesStore';
+import type { CachedMessage } from '../store/messagesStore';
 
-export interface ChannelMessage {
-  id?: number;
-  tempId?: string;
-  content?: string;
-  senderId?: number;
-  channelId?: number;
-  createdAt?: string;
+export interface ChannelMessage extends CachedMessage, Partial<SharedMessage> {
   raw?: any;
-  status?: 'pending' | 'sent' | 'failed';
 }
 
 export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
+  const msgStore = useMessagesStore();
   const timersRef = useRef<Record<string, any>>({});
   const FAILURE_TIMEOUT = 5000; // ms
+  // hydrate from cache when channel changes
+  useEffect(() => {
+    if (channelId) {
+      const cached = msgStore.byChannel[channelId];
+      if (cached) setMessages(cached as ChannelMessage[]);
+    }
+  }, [channelId, msgStore.byChannel]);
   useEffect(() => {
     if (!channelId) return;
     socketManager.joinChannel(channelId);
     const off = socketManager.on('messageReceived', (msg: any) => {
       if (msg.channelId === channelId) {
         setMessages(prev => {
-          const idx = prev.findIndex(m => m.status === 'pending' && !m.id && m.content === msg.content);
+          const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
           if (idx !== -1) {
             const clone = [...prev];
-            clone[idx] = { ...clone[idx], ...msg, raw: msg, id: msg.id, status: 'sent' };
+            clone[idx] = { ...clone[idx], ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage;
             const tempId = clone[idx].tempId;
             if (tempId && timersRef.current[tempId]) {
               clearTimeout(timersRef.current[tempId]);
               delete timersRef.current[tempId];
             }
+            if (channelId) msgStore.setChannel(channelId, clone as ChannelMessage[]);
             return clone;
           }
-            return [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' }];
+            const next = [...prev, { ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage];
+            if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+            return next;
         });
       }
     });
@@ -143,11 +151,19 @@ export function useChannel(channelId: number | null) {
 
   const sendMessage = useCallback((content: string) => {
     if (!channelId) return;
-    const tempId = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-    setMessages(prev => [...prev, { tempId, content, channelId, status: 'pending' }]);
-    socketManager.emit('sendMessage', { channelId, content });
+  const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+    setMessages(prev => {
+      const next = [...prev, { tempId, content, channelId, status: 'pending' } as ChannelMessage];
+      if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+      return next;
+    });
+  socketManager.emit('sendMessage', { channelId, content, clientMsgId: tempId });
     timersRef.current[tempId] = setTimeout(() => {
-      setMessages(prev => prev.map(m => m.tempId === tempId && !m.id && m.status === 'pending' ? { ...m, status: 'failed' } : m));
+      setMessages(prev => {
+        const next = prev.map(m => m.tempId === tempId && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
+        if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+        return next;
+      });
       delete timersRef.current[tempId];
     }, FAILURE_TIMEOUT);
   }, [channelId]);
@@ -159,13 +175,18 @@ export function useChannel(channelId: number | null) {
       const clone = [...prev];
       const original = clone[idx];
       const newTemp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      clone[idx] = { ...original, tempId: newTemp, status: 'pending' };
+      clone[idx] = { ...original, tempId: newTemp, status: 'pending' } as ChannelMessage;
       // emit again
-      socketManager.emit('sendMessage', { channelId, content: original.content });
+  socketManager.emit('sendMessage', { channelId, content: original.content, clientMsgId: newTemp });
       timersRef.current[newTemp] = setTimeout(() => {
-        setMessages(p => p.map(m => m.tempId === newTemp && !m.id && m.status === 'pending' ? { ...m, status: 'failed' } : m));
+        setMessages(p => {
+          const next = p.map(m => m.tempId === newTemp && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
+          if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+          return next;
+        });
         delete timersRef.current[newTemp];
       }, FAILURE_TIMEOUT);
+      if (channelId) msgStore.setChannel(channelId, clone as ChannelMessage[]);
       return clone;
     });
   }, [channelId]);
@@ -189,4 +210,41 @@ export function useChannelPresence(channelId: number | null) {
     return () => { off(); setUsers([]); };
   }, [channelId]);
   return users;
+}
+
+// Typing hook
+export function useTyping(channelId: number | null, debounceMs = 250) {
+  const [typingUsers, setTypingUsers] = useState<{ userId: number; username: string }[]>([]);
+  const timeoutRef = useRef<Record<number, any>>({});
+  useEffect(() => {
+    if (!channelId) { setTypingUsers([]); return; }
+    const off = socketManager.on('channelTyping', (payload: any) => {
+      if (payload.channelId !== channelId) return;
+      setTypingUsers(prev => {
+        const exists = prev.find(p => p.userId === payload.userId);
+        if (payload.typing) {
+          if (exists) return prev;
+          return [...prev, { userId: payload.userId, username: payload.username }];
+        } else {
+          return prev.filter(p => p.userId !== payload.userId);
+        }
+      });
+      // auto-remove after debounce to avoid stuck indicators
+      if (payload.typing) {
+        if (timeoutRef.current[payload.userId]) clearTimeout(timeoutRef.current[payload.userId]);
+        timeoutRef.current[payload.userId] = setTimeout(() => {
+          setTypingUsers(prev => prev.filter(p => p.userId !== payload.userId));
+          delete timeoutRef.current[payload.userId];
+        }, debounceMs * 3);
+      }
+    });
+    return () => { off(); Object.values(timeoutRef.current).forEach(t => clearTimeout(t)); setTypingUsers([]); };
+  }, [channelId, debounceMs]);
+
+  const emitTyping = useCallback((isTyping: boolean) => {
+    if (!channelId) return;
+    socketManager.emit('typing', { channelId, typing: isTyping });
+  }, [channelId]);
+
+  return { typingUsers, emitTyping };
 }

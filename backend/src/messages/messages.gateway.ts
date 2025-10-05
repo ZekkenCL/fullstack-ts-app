@@ -7,7 +7,8 @@ import { UseGuards } from '@nestjs/common';
 import { WsAuthGuard } from '../realtime/ws-auth.guard';
 import { MetricsService } from '../metrics/metrics.service';
 
-interface SendMessagePayload { content: string; channelId: number }
+interface SendMessagePayload { content: string; channelId: number; clientMsgId?: string }
+interface TypingPayload { channelId: number; typing: boolean }
 interface JoinChannelPayload { channelId: number }
 
 @WebSocketGateway()
@@ -107,10 +108,24 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
       return;
     }
     const start = Date.now();
-    const message = await this.messagesService.create({ content: payload.content, channelId: payload.channelId, senderId: user.id });
+  const message = await this.messagesService.create({ content: payload.content, channelId: payload.channelId, senderId: user.id });
     const latency = (Date.now() - start) / 1000;
     this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
-    this.server.to(room).emit('messageReceived', message);
+    const enriched = payload.clientMsgId ? { ...message, clientMsgId: payload.clientMsgId } : message;
+    this.server.to(room).emit('messageReceived', enriched);
+  }
+
+  @SubscribeMessage('typing')
+  async handleTyping(@ConnectedSocket() client: Socket, @MessageBody() payload: TypingPayload) {
+    this.metrics.incrementWsEvent('typing');
+    const user = (client as any).user;
+    if (!user?.id || !payload?.channelId) return;
+    // membership check (silent fail)
+    try {
+      await this.channelsService.assertMember(payload.channelId, user.id);
+    } catch { return; }
+    const room = `channel:${payload.channelId}`;
+    this.server.to(room).emit('channelTyping', { channelId: payload.channelId, userId: user.id, username: user.username, typing: payload.typing });
   }
 }

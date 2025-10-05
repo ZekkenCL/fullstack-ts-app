@@ -12,10 +12,17 @@
     "baseUrl": "./src",
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
+    "composite": true,
+    "incremental": true,
     "paths": {
-      "@/*": ["*"]
+      "@/*": ["*"],
+      "@shared/*": ["../shared/src/*"],
+      "@shared": ["../shared/src/types"]
     }
   },
+  "references": [
+    { "path": "../shared" }
+  ],
   "include": ["src/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

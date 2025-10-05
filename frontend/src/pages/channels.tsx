@@ -2,9 +2,10 @@ import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
-import { useChannel, useChannelPresence } from '../lib/socket';
+import { useChannel, useChannelPresence, useTyping } from '../lib/socket';
 
-interface Channel { id: number; name: string }
+import type { SharedChannel } from '../../../shared/src/types';
+interface Channel extends SharedChannel {}
 
 export default function ChannelsPage() {
   const { accessToken, user, clear } = useAuthStore();
@@ -16,6 +17,7 @@ export default function ChannelsPage() {
   const [activeChannelId, setActiveChannelId] = useState<number | null>(null);
   const { messages, sendMessage, resendMessage } = useChannel(activeChannelId);
   const presence = useChannelPresence(activeChannelId);
+  const { typingUsers, emitTyping } = useTyping(activeChannelId);
   const [draft, setDraft] = useState('');
   const listRef = useRef<HTMLDivElement | null>(null);
   const [autoScroll, setAutoScroll] = useState(true);
@@ -151,9 +153,15 @@ export default function ChannelsPage() {
                       {newSince} nuevo{newSince>1?'s':''} ↓
                     </button>
                   )}
+                  {typingUsers.length > 0 && (
+                    <div className="mt-2 text-[11px] text-gray-500 flex items-center gap-2">
+                      {typingUsers.slice(0,3).map(u => u.username).join(', ')} {typingUsers.length>3 ? `+${typingUsers.length-3}`: ''} está{typingUsers.length>1?'n':''} escribiendo...
+                      <span className="inline-block animate-pulse">•••</span>
+                    </div>
+                  )}
                 </div>
                 <div className="border-t p-2 flex gap-2">
-                  <input value={draft} onChange={(e)=>setDraft(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); send(); } }} className="flex-1 border px-3 py-2 rounded" placeholder="Escribe un mensaje" />
+                  <input value={draft} onChange={(e)=>{ setDraft(e.target.value); emitTyping(true); }} onBlur={()=>emitTyping(false)} onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); emitTyping(false); send(); } }} className="flex-1 border px-3 py-2 rounded" placeholder="Escribe un mensaje" />
                   <button onClick={send} className="bg-blue-600 text-white px-4 py-2 rounded">Enviar</button>
                 </div>
               </>
