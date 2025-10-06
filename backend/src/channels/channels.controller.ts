@@ -101,6 +101,12 @@ export class ChannelsController {
     const lim = Math.max(1, Math.min(parseInt(limit || '50', 10) || 50, 100));
     const cur = cursor ? parseInt(cursor, 10) : undefined;
     const history = await this.messagesService.channelHistory(id, lim, cur);
+    // Aplanar sender en cada item (ya incluido por el servicio)
+    (history as any).items = history.items.map((m: any) => ({
+      ...m,
+      username: m.sender?.username,
+      avatarUrl: m.sender?.avatarUrl,
+    }));
     if (history.items.length > 0) {
       const ids = history.items.map((m: any) => m.id).filter((v: any) => typeof v === 'number');
       if (ids.length) {
@@ -132,7 +138,13 @@ export class ChannelsController {
     if (!term) return { items: [], nextCursor: null };
     const lim = Math.max(1, Math.min(parseInt(limit || '30', 10) || 30, 100));
     const cur = cursor ? parseInt(cursor, 10) : undefined;
-    return this.messagesService.searchInChannel(id, term, lim, cur);
+    const res = await this.messagesService.searchInChannel(id, term, lim, cur);
+    (res as any).items = res.items.map((m: any) => ({
+      ...m,
+      username: m.sender?.username,
+      avatarUrl: m.sender?.avatarUrl,
+    }));
+    return res;
   }
 
   @Post()

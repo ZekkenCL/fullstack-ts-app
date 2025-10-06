@@ -97,10 +97,10 @@ export class ChannelsService {
     }
     const rows = await (this.prisma as any).channelMember.findMany({
       where,
-      select: { userId: true, role: true, user: { select: { id: true, username: true } } },
+      select: { userId: true, role: true, user: { select: { id: true, username: true, avatarUrl: true } } },
       orderBy: { user: { username: 'asc' } },
       take: Math.min(Math.max(limit, 1), 50),
     });
-    return rows.map((r: any) => ({ id: r.user.id, username: r.user.username, role: r.role }));
+    return rows.map((r: any) => ({ id: r.user.id, username: r.user.username, role: r.role, avatarUrl: r.user.avatarUrl }));
   }
 }

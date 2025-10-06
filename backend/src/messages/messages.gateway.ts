@@ -119,7 +119,12 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     const latency = (Date.now() - start) / 1000;
     this.metrics.observeMessageLatency(latency);
     const room = `channel:${payload.channelId}`;
-  const enriched = payload.clientMsgId ? { ...message, clientMsgId: payload.clientMsgId, username: user.username } : { ...message, username: user.username };
+  const enrichedBase: any = {
+    ...message,
+    username: message?.sender?.username || user.username,
+    avatarUrl: message?.sender?.avatarUrl || null,
+  };
+  const enriched = payload.clientMsgId ? { ...enrichedBase, clientMsgId: payload.clientMsgId } : enrichedBase;
     if (payload.clientSentAt && typeof payload.clientSentAt === 'number') {
       const rttSeconds = (Date.now() - payload.clientSentAt) / 1000;
       if (rttSeconds >= 0 && rttSeconds < 60) {

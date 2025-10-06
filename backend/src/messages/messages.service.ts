@@ -10,9 +10,11 @@ export interface ChannelHistoryResult<T> { items: T[]; nextCursor: number | null
 export class MessagesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async create(data: { content: string; channelId: number; senderId: number }): Promise<MessageEntity> {
-    // Centralizar aquí futuras validaciones (existencia de canal, permisos, etc.)
-    return (this.prisma as any).message.create({ data });
+  async create(data: { content: string; channelId: number; senderId: number }): Promise<any> {
+    return (this.prisma as any).message.create({
+      data,
+      include: { sender: { select: { id: true, username: true, avatarUrl: true } } }
+    });
   }
 
   async edit(id: number, userId: number, content: string): Promise<MessageEntity> {
@@ -23,14 +25,25 @@ export class MessagesService {
     return (this.prisma as any).message.update({ where: { id }, data: { content, updatedAt: new Date() } });
   }
 
-  async findByChannel(channelId: number, page = 1, limit = 50): Promise<MessageEntity[]> {
+  async findByChannel(channelId: number, page = 1, limit = 50): Promise<any[]> {
     const skip = (page - 1) * limit;
-    return (this.prisma as any).message.findMany({ where: { channelId }, orderBy: { id: 'desc' }, skip, take: limit });
+    return (this.prisma as any).message.findMany({
+      where: { channelId },
+      orderBy: { id: 'desc' },
+      skip,
+      take: limit,
+      include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+    });
   }
 
-  async findAll(page = 1, limit = 50): Promise<MessageEntity[]> {
+  async findAll(page = 1, limit = 50): Promise<any[]> {
     const skip = (page - 1) * limit;
-    return (this.prisma as any).message.findMany({ orderBy: { id: 'desc' }, skip, take: limit });
+    return (this.prisma as any).message.findMany({
+      orderBy: { id: 'desc' },
+      skip,
+      take: limit,
+      include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+    });
   }
   /**
    * Cursor-based history (older messages). Returns ascending order (oldest -> newest)
@@ -41,10 +54,11 @@ export class MessagesService {
     const take = Math.min(limit, 100);
     const where: any = { channelId };
     if (cursor) where.id = { lt: cursor };
-    const rows: MessageEntity[] = await (this.prisma as any).message.findMany({
+    const rows: any[] = await (this.prisma as any).message.findMany({
       where,
       orderBy: { id: 'desc' },
       take,
+      include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
     });
     // rows are newest->oldest; reverse to oldest->newest for UI
     const items = [...rows].reverse();
@@ -66,7 +80,12 @@ export class MessagesService {
     if (q.length < 3) {
       const where: any = { channelId, content: { contains: q, mode: 'insensitive' } };
       if (cursor) where.id = { lt: cursor };
-      const rows: MessageEntity[] = await (this.prisma as any).message.findMany({ where, orderBy: { id: 'desc' }, take });
+      const rows: any[] = await (this.prisma as any).message.findMany({
+        where,
+        orderBy: { id: 'desc' },
+        take,
+        include: { sender: { select: { id: true, username: true, avatarUrl: true } } },
+      });
       const items = [...rows].reverse();
       let nextCursor: number | null = null;
       if (rows.length === take) {

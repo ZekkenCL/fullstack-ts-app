@@ -12,6 +12,8 @@ import { useMessagesStore } from '../store/messagesStore';
 import { Virtuoso } from 'react-virtuoso';
 
 import type { SharedChannel } from '../../../shared/src/types';
+import UserAvatar from '../components/UserAvatar';
+import AvatarUploader from '../components/AvatarUploader';
 interface Channel extends SharedChannel { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean }
 
 // Componente aislado para renderizado markdown async (evita usar hooks dentro de itemContent de Virtuoso)
@@ -63,6 +65,26 @@ export default function ChannelsPage() {
   const [globalSearch, setGlobalSearch] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  // Member list (right sidebar)
+  const [members, setMembers] = useState<{ id: number; username: string; role: string; avatarUrl?: string | null }[]>([]);
+  const [membersLoading, setMembersLoading] = useState(false);
+
+  // --- Role & avatar color helpers ---
+  const roleStyle = (role?: string) => {
+    if (role === 'owner') return 'text-[#e3b341]'; // gold-ish for owner
+    return 'text-discord-text';
+  };
+  const roleBadge = (role?: string) => {
+    if (role === 'owner') return <span className="ml-1 text-[9px] font-semibold uppercase tracking-wide text-[#e3b341]">OWNER</span>;
+    return null;
+  };
+  const avatarColor = (username: string) => {
+    // simple hash to HSL for consistent color per user
+    let h = 0;
+    for (let i = 0; i < username.length; i++) h = (h * 31 + username.charCodeAt(i)) >>> 0;
+    const hue = h % 360;
+    return `hsl(${hue} 65% 40%)`;
+  };
   // Reacciones tooltip
   const [reactionHover, setReactionHover] = useState<{ emoji: string; users: { username: string }[]; x: number; y: number } | null>(null);
   const reactionCacheRef = useRef<Record<string, { usernames: string[]; last: number }>>({}); // key = messageId|emoji
@@ -180,6 +202,34 @@ export default function ChannelsPage() {
     return out;
   }, [messages, lastReadId]);
 
+  const renderMessageRow = (item: MessageItem) => {
+    const m = item.m;
+    const showHeader = !item.compact;
+    const avatarUrl = m.avatarUrl || m.sender?.avatarUrl;
+    const username = m.username || m.sender?.username || '???';
+    return (
+      <div className={`px-4 py-[2px] hover:bg-discord-bg-hover/30 rounded-md ${item.compact ? 'pl-14' : ''}`}>
+        {!item.compact && (
+          <div className="flex items-start gap-3">
+            <UserAvatar username={username} avatarUrl={avatarUrl} size={40} />
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 text-sm">
+                <span className={`font-medium ${m.role==='owner' ? 'text-[#e3b341]' : 'text-discord-text'}`}>{username}</span>
+                <span className="text-[11px] text-discord-text-muted">{formatTime(m.createdAt)}</span>
+              </div>
+              <MessageMarkdown content={m.content} />
+            </div>
+          </div>
+        )}
+        {item.compact && (
+          <div className="pl-14 text-sm">
+            <MessageMarkdown content={m.content} />
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const toggleReaction = async (messageId: number, emoji: string) => {
     try {
       await fetch(`/messages/${messageId}/reactions`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` }, body: JSON.stringify({ emoji }) });
@@ -244,6 +294,15 @@ export default function ChannelsPage() {
       .catch(e => { if (mounted) { setError(e.message); setLoading(false); } });
     return () => { mounted = false; };
   }, [accessToken, router]);
+
+  // Fetch full member list for active channel (limited by backend to 20 for ahora)
+  useEffect(() => {
+    let active = true;
+    if (!activeChannelId) { setMembers([]); return; }
+    setMembersLoading(true);
+  api.channelMembers(activeChannelId).then(list => { if(active) setMembers(list||[]); }).catch(()=>{ if(active) setMembers([]); }).finally(()=>{ if(active) setMembersLoading(false); });
+    return () => { active = false; };
+  }, [activeChannelId]);
 
   const createChannel = async () => {
     if (!newName.trim()) return;
@@ -458,9 +517,7 @@ export default function ChannelsPage() {
                   }
                   const { m, compact } = item;
                   const statusClass = m.status === 'pending' ? 'opacity-50' : m.status === 'failed' ? 'text-discord-danger' : '';
-                  const rawUsername = (m as any).username ?? (typeof m.senderId !== 'undefined' ? `user-${m.senderId}` : 'yo');
-                  const username = String(rawUsername);
-                  const avatarInitial = (username || '?').toString().charAt(0).toUpperCase();
+                  const username = (m as any).username || (m.sender?.username) || (typeof m.senderId !== 'undefined' ? `user-${m.senderId}` : 'yo');
                   const reactions = (m as any).reactions || [];
                   const grouped = reactions.reduce((acc: Record<string, { emoji: string; count: number; mine: boolean; users: { id: number; username: string }[] }>, r: any) => {
                     const k = r.emoji;
@@ -472,48 +529,11 @@ export default function ChannelsPage() {
                   }, {});
                   const reactionList: { emoji: string; count: number; mine: boolean; users: { id: number; username: string }[] }[] = Object.values(grouped);
                   return (
-                    <div data-mid={m.id} className={`group flex items-start pr-6 ${statusClass} rounded px-2 py-0.5 hover:bg-discord-bg-hover/30 relative`}> 
-                      {!compact && (
-                        <div className="w-8 mt-1 h-8 mr-3 rounded-full bg-discord-bg-hover flex items-center justify-center text-[13px] font-semibold text-discord-text select-none shrink-0">{avatarInitial}</div>
-                      )}
-                      {compact && <div className="w-8 mr-3" />}
-                      <div className={`flex-1 leading-snug ${compact ? '' : 'space-y-0.5'}`}>
-                        {!compact && (
-                          <div className="flex items-center gap-2">
-                            <span className="font-semibold text-discord-text">{username}</span>
-                            {m.createdAt && <span className="text-[10px] text-discord-text-muted">{formatTime(m.createdAt as any)}</span>}
-                            {m.updatedAt && <span className="text-[9px] text-discord-text-muted italic">(editado)</span>}
-                          </div>
-                        )}
-                        {editingId === m.id ? (
-                          <form onSubmit={e => { e.preventDefault(); if (editingText.trim()) { editMessage(m.id!, editingText.trim()); setEditingId(null); } }} className="mt-0.5">
-                            <input autoFocus value={editingText} onChange={e=>setEditingText(e.target.value)} onKeyDown={e=>{ if(e.key==='Escape'){ setEditingId(null); setEditingText(''); } }} className="w-full bg-discord-input border border-discord-border rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-discord-primary/50" />
-                            <div className="flex gap-2 mt-1">
-                              <button type="submit" className="text-[10px] bg-discord-primary/70 hover:bg-discord-primary text-white px-2 py-0.5 rounded">Guardar</button>
-                              <button type="button" onClick={()=>{ setEditingId(null); setEditingText(''); }} className="text-[10px] text-discord-text-muted hover:text-discord-danger">Cancelar</button>
-                            </div>
-                          </form>
-                        ) : (
-                          <div className={`${compact ? 'pl-0' : ''}`}>
-                            <MessageMarkdown content={m.content || ''} />
-                            {m.status === 'pending' && (
-                              <span className="ml-2 text-[10px] text-discord-text-muted">
-                                enviando… {typeof (m as any).attempt === 'number' && m.attempt! > 0 && `(${m.attempt}/${m.maxAttempts})`}
-                              </span>
-                            )}
-                            {m.status === 'failed' && (
-                              <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
-                                falló {typeof (m as any).attempt === 'number' && m.maxAttempts ? `(${Math.min((m as any).attempt, (m as any).maxAttempts)}/${(m as any).maxAttempts})` : ''}
-                                {m.tempId && (
-                                  <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
-                                )}
-                              </span>
-                            )}
-                          </div>
-                        )}
-                        {reactionList.length > 0 && (
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {reactionList.map(r => {
+                    <div data-mid={m.id} className={`group relative ${statusClass}`}>
+                      {renderMessageRow({ type: 'message', m, day: '', compact })}
+                      {reactionList.length > 0 && (
+                        <div className="pl-14 pr-4 mt-1 flex flex-wrap gap-1">
+                          {reactionList.map(r => {
                               const handleHover = async (emoji: string, rect: DOMRect) => {
                                 if (!m.id) return;
                                 const key = `${m.id}|${emoji}`;
@@ -522,7 +542,6 @@ export default function ChannelsPage() {
                                 if (cached && Date.now() - cached.last < 15000) {
                                   usernames = cached.usernames;
                                 } else {
-                                  // Si ya tenemos usernames completos en r.users los usamos; si detectamos placeholders, hacemos fetch
                                   const rawUsernames = r.users.map(u => u.username);
                                   const needFetch = rawUsernames.some(name => /^user-\d+$/.test(name));
                                   if (needFetch) {
@@ -553,31 +572,30 @@ export default function ChannelsPage() {
                                   onLeave={() => setReactionHover(prev => prev && prev.emoji === r.emoji ? null : prev)}
                                 />
                               );
-                            })}
-                          </div>
-                        )}
-                        <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1 items-center">
-                          <button
-                            onClick={(e) => {
-                              const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
-                              setPicker({ x: rect.left, y: rect.bottom + 4, messageId: m.id! });
-                            }}
-                            className="text-[11px] px-2 h-6 rounded-full bg-discord-bg-hover hover:bg-discord-bg-hover/70 border border-discord-border"
-                            title="Agregar reacción"
-                          >➕</button>
-                          {m.id && m.senderId && user?.id === m.senderId && editingId !== m.id && (
-                            <>
-                              <button onClick={() => { setEditingId(m.id!); setEditingText(m.content || ''); }} className="text-[10px] text-discord-text-muted hover:text-discord-text px-1" title="Editar">Editar</button>
-                              <button onClick={() => { if(confirm('Eliminar mensaje?')) deleteMessage(m.id!); }} className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1" title="Eliminar">Eliminar</button>
-                            </>
-                          )}
-                          {reactionList.some(r => r.mine) && (
-                            <button
-                              onClick={() => reactionList.filter(r=>r.mine).forEach(r=>removeReaction(m.id!, r.emoji))}
-                              className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1"
-                            >Quitar</button>
-                          )}
+                          })}
                         </div>
+                      )}
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1 items-center pl-14 pr-4 pb-1">
+                        <button
+                          onClick={(e) => {
+                            const rect = (e.currentTarget as HTMLButtonElement).getBoundingClientRect();
+                            setPicker({ x: rect.left, y: rect.bottom + 4, messageId: m.id! });
+                          }}
+                          className="text-[11px] px-2 h-6 rounded-full bg-discord-bg-hover hover:bg-discord-bg-hover/70 border border-discord-border"
+                          title="Agregar reacción"
+                        >➕</button>
+                        {m.id && m.senderId && user?.id === m.senderId && editingId !== m.id && (
+                          <>
+                            <button onClick={() => { setEditingId(m.id!); setEditingText(m.content || ''); }} className="text-[10px] text-discord-text-muted hover:text-discord-text px-1" title="Editar">Editar</button>
+                            <button onClick={() => { if(confirm('Eliminar mensaje?')) deleteMessage(m.id!); }} className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1" title="Eliminar">Eliminar</button>
+                          </>
+                        )}
+                        {reactionList.some(r => r.mine) && (
+                          <button
+                            onClick={() => reactionList.filter(r=>r.mine).forEach(r=>removeReaction(m.id!, r.emoji))}
+                            className="text-[10px] text-discord-text-muted hover:text-discord-danger px-1"
+                          >Quitar</button>
+                        )}
                       </div>
                     </div>
                   );
@@ -585,16 +603,6 @@ export default function ChannelsPage() {
                 components={{
                   Header: () => (
                     <div>
-                      {activeChannelId && presence.length > 0 && (
-                        <div className="mb-2 pb-2 border-b border-discord-border">
-                          <p className="text-[10px] uppercase tracking-wide text-discord-text-muted mb-1">Presencia</p>
-                          <div className="flex flex-wrap gap-2">
-                            {presence.map(u => (
-                              <span key={u.userId} className="text-[11px] bg-discord-bg-hover text-discord-text px-2 py-0.5 rounded">{u.username}</span>
-                            ))}
-                          </div>
-                        </div>
-                      )}
                       {loadingHistory && <p className="text-[10px] text-discord-text-muted">Cargando historial...</p>}
                       {activeChannelId && messages.length === 0 && !loadingHistory && <p className="text-xs text-discord-text-muted">Sin mensajes aún.</p>}
                     </div>
@@ -677,6 +685,58 @@ export default function ChannelsPage() {
               </div>
             )}
           </div>
+          {/* Right sidebar member list */}
+          <aside className="w-60 bg-discord-bg-alt border-l border-discord-border flex flex-col">
+            <div className="h-12 px-3 flex items-center border-b border-discord-border text-[11px] uppercase tracking-wide text-discord-text-muted justify-between">
+              Miembros {activeChannelId && <span className="text-discord-text-muted">({members.length})</span>}
+              <button
+                disabled={membersLoading || !activeChannelId}
+                onClick={()=>{ if(!activeChannelId) return; setMembersLoading(true); api.channelMembers(activeChannelId).then(list=>setMembers(list||[])).finally(()=>setMembersLoading(false)); }}
+                className="text-[10px] px-2 py-0.5 rounded bg-discord-bg-hover hover:bg-discord-bg-hover/70 disabled:opacity-40"
+                title="Refrescar miembros"
+              >↻</button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-2 py-2 space-y-3">
+              {membersLoading && <p className="text-[11px] text-discord-text-muted">Cargando...</p>}
+              {!membersLoading && members.length === 0 && activeChannelId && (
+                <p className="text-[11px] text-discord-text-muted">Sin miembros.</p>
+              )}
+              {members.length > 0 && (
+                <div className="space-y-4">
+                  {(() => {
+                    const onlineSet = new Set(presence.map(p=>p.userId));
+                    const owners = members.filter(m=>m.role==='owner');
+                    const others = members.filter(m=>m.role!=='owner');
+                    const renderGroup = (title: string, list: typeof members) => (
+                      <div key={title}>
+                        <p className="text-[10px] font-semibold text-discord-text-muted mb-1 uppercase tracking-wide">{title} — {list.length}</p>
+                        <ul className="space-y-1">
+                          {list.map(m => {
+                            const online = onlineSet.has(m.id);
+                            return (
+                              <li key={m.id} className="flex items-center gap-2 text-xs text-discord-text">
+                                <UserAvatar username={m.username} avatarUrl={m.avatarUrl} size={24} />
+                                <div className="flex-1 min-w-0">
+                                  <span className={`truncate ${m.role==='owner' ? 'text-[#e3b341] font-semibold' : ''}`}>{m.username}</span>
+                                  {m.role==='owner' && <span className="ml-1 text-[8px] uppercase tracking-wide text-[#e3b341]">owner</span>}
+                                </div>
+                                <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : 'bg-gray-500'}`} title={online ? 'En línea':'Desconectado'}></span>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      </div>
+                    );
+                    return <>{owners.length>0 && renderGroup('Owner', owners)}{others.length>0 && renderGroup('Miembros', others)}</>;
+                  })()}
+                </div>
+              )}
+            </div>
+            {/* Zona de perfil / subir avatar */}
+            <div className="p-3 border-t border-discord-border">
+              <AvatarUploader />
+            </div>
+          </aside>
         </div>
       </div>
     </div>

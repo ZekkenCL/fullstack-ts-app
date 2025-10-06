@@ -10,7 +10,7 @@ export class UsersService {
 
   async create(data: CreateUserDto): Promise<User> {
     const email = data.email ?? `${data.username}@placeholder.local`;
-    return this.prisma.user.create({ data: { username: data.username, password: data.password, email } });
+  return (this.prisma as any).user.create({ data: { username: data.username, password: data.password, email, avatarUrl: data.avatarUrl } });
   }
 
   async findAll(): Promise<User[]> {
@@ -28,8 +28,12 @@ export class UsersService {
   async update(id: number, data: UpdateUserDto): Promise<User> {
     return this.prisma.user.update({
       where: { id },
-      data,
+      data: { ...data },
     });
+  }
+
+  async updateAvatar(id: number, avatarUrl: string): Promise<User> {
+    return (this.prisma as any).user.update({ where: { id }, data: { avatarUrl } });
   }
 
   async remove(id: number): Promise<User> {

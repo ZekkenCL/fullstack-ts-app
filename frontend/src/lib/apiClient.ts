@@ -159,4 +159,17 @@ export const api = {
   muteChannel: (id: number) => apiRequest(`/channels/${id}/mute`, { method: 'POST', auth: true }),
   unmuteChannel: (id: number) => apiRequest(`/channels/${id}/unmute`, { method: 'POST', auth: true }),
   setChannelNotifications: (id: number, enabled: boolean) => apiRequest(`/channels/${id}/notifications`, { method: 'POST', auth: true, body: JSON.stringify({ enabled }) }),
+  uploadAvatar: async (file: File) => {
+    const store = getAuthStore();
+    const { accessToken } = store.getState();
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(BASE_URL + '/users/me/avatar', {
+      method: 'POST',
+      headers: { Authorization: accessToken ? `Bearer ${accessToken}` : '' },
+      body: form,
+    });
+    if (!res.ok) throw await parseError(res);
+    return res.json();
+  },
 };

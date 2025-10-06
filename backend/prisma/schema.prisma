@@ -3,6 +3,7 @@ model User {
   username           String          @unique
   email              String          @unique
   password           String
+  avatarUrl          String?         // URL de avatar subida por el usuario
   channelMemberships ChannelMember[]
   messages           Message[]       @relation("UserMessages")
   refreshTokens      RefreshToken[]

@@ -24,11 +24,20 @@ import { SocketAdapter } from './realtime/socket.adapter';
 import { validateEnv } from './config/env.validation';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
+import { join } from 'path';
+import { mkdirSync } from 'fs';
+import { ExpressAdapter } from '@nestjs/platform-express';
+import express from 'express';
 
 async function bootstrap() {
   // Validate environment early (fail-fast)
   validateEnv(process.env);
-  const app = await NestFactory.create(AppModule);
+  const server = express();
+  // Static assets for uploaded avatars
+  const avatarDir = join(__dirname, '..', 'uploads', 'avatars');
+  try { mkdirSync(avatarDir, { recursive: true }); } catch {}
+  server.use('/uploads/avatars', express.static(avatarDir));
+  const app = await NestFactory.create(AppModule, new ExpressAdapter(server));
   // Seguridad HTTP
   app.use(helmet({
     crossOriginEmbedderPolicy: false, // compatibilidad si usas iframes o CDNs

@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 
-interface AuthUser { id: number; username: string }
+interface AuthUser { id: number; username: string; avatarUrl?: string }
 interface AuthState {
   accessToken: string | null;
   refreshToken: string | null;
