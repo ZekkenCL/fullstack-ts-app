@@ -60,14 +60,41 @@ export class MessagesService {
   /** Simple ILIKE search inside a channel with cursor (id < cursor) ordering newest->oldest then reversed */
   async searchInChannel(channelId: number, query: string, limit = 30, cursor?: number): Promise<ChannelHistoryResult<MessageEntity>> {
     const take = Math.min(limit, 100);
-    const where: any = { channelId, content: { contains: query, mode: 'insensitive' } };
-    if (cursor) where.id = { lt: cursor };
-    const rows: MessageEntity[] = await (this.prisma as any).message.findMany({ where, orderBy: { id: 'desc' }, take });
+    const q = query.trim();
+    if (!q) return { items: [], nextCursor: null };
+    // Fallback to simple contains for very short tokens (< 3 chars) to avoid useless tsquery overhead
+    if (q.length < 3) {
+      const where: any = { channelId, content: { contains: q, mode: 'insensitive' } };
+      if (cursor) where.id = { lt: cursor };
+      const rows: MessageEntity[] = await (this.prisma as any).message.findMany({ where, orderBy: { id: 'desc' }, take });
+      const items = [...rows].reverse();
+      let nextCursor: number | null = null;
+      if (rows.length === take) {
+        const oldest = rows[rows.length - 1];
+        if (oldest) nextCursor = oldest.id;
+      }
+      return { items, nextCursor };
+    }
+    // Use plainto_tsquery for safer parsing; language spanish (matches migration) else fallback english
+    const tsQueryParam = q;
+    const cursorClause = cursor ? 'AND m.id < $3' : '';
+    const params: any[] = [channelId, tsQueryParam];
+    if (cursor) params.push(cursor);
+    const raw: any[] = await (this.prisma as any).$queryRawUnsafe(
+      `SELECT m.* FROM "Message" m
+       WHERE m.channelId = $1
+         AND m.content_tsv @@ plainto_tsquery('spanish', $2)
+         ${cursorClause}
+       ORDER BY m.id DESC
+       LIMIT ${take}`,
+      ...params
+    );
+    const rows: MessageEntity[] = raw as any;
     const items = [...rows].reverse();
     let nextCursor: number | null = null;
     if (rows.length === take) {
       const oldest = rows[rows.length - 1];
-      if (oldest) nextCursor = oldest.id;
+      if (oldest) nextCursor = (oldest as any).id;
     }
     return { items, nextCursor };
   }

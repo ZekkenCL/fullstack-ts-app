@@ -24,17 +24,17 @@ export class ChannelsController {
   ) {}
 
   @Get()
-  async getAllChannels(@Req() req: any): Promise<(ChannelEntity & { unread?: number })[]> {
+  async getAllChannels(@Req() req: any): Promise<(ChannelEntity & { unread?: number; myRole?: string })[]> {
     const channels = await this.channelsService.findAll();
     const userId = req.user?.id;
     if (!userId) return channels;
     // For each channel membership compute unread (naive N+1; could batch optimize later)
-    const enriched: (ChannelEntity & { unread?: number })[] = [];
+    const enriched: (ChannelEntity & { unread?: number; myRole?: string })[] = [];
     for (const c of channels) {
       try {
-        await this.channelsService.assertMember(c.id, userId);
+        const member = await this.channelsService.assertMember(c.id, userId);
         const unread = await this.readState.unreadCount(userId, c.id);
-        enriched.push({ ...c, unread });
+        enriched.push({ ...c, unread, myRole: member.role });
       } catch {
         enriched.push(c as any);
       }

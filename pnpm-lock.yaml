@@ -193,6 +193,9 @@ importers:
       react-query:
         specifier: ^3.0.0
         version: 3.39.3(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
+      react-virtuoso:
+        specifier: ^4.14.1
+        version: 4.14.1(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       socket.io-client:
         specifier: ^4.7.5
         version: 4.8.1
@@ -3556,6 +3559,12 @@ packages:
         optional: true
       react-native:
         optional: true
+
+  react-virtuoso@4.14.1:
+    resolution: {integrity: sha512-NRUF1ak8lY+Tvc6WN9cce59gU+lilzVtOozP+pm9J7iHshLGGjsiAB4rB2qlBPHjFbcXOQpT+7womNHGDUql8w==}
+    peerDependencies:
+      react: '>=16 || >=17 || >= 18 || >= 19'
+      react-dom: '>=16 || >=17 || >= 18 || >=19'
 
   react@19.2.0:
     resolution: {integrity: sha512-tmbWg6W31tQLeB5cdIBOicJDJRR2KzXsV7uSK9iNfLWQ5bIZfxuPEHp7M8wiHyHnn0DD1i7w3Zmin0FtkrwoCQ==}
@@ -8551,6 +8560,11 @@ snapshots:
       match-sorter: 6.3.4
       react: 19.2.0
     optionalDependencies:
+      react-dom: 19.2.0(react@19.2.0)
+
+  react-virtuoso@4.14.1(react-dom@19.2.0(react@19.2.0))(react@19.2.0):
+    dependencies:
+      react: 19.2.0
       react-dom: 19.2.0(react@19.2.0)
 
   react@19.2.0: {}

@@ -64,6 +64,18 @@ export class ChannelsService {
   }
 
   async remove(id: number): Promise<ChannelEntity> {
-    return (this.prisma as any).channel.delete({ where: { id } });
+    // Cascade delete manually (Prisma referential actions not configured)
+    return (this.prisma as any).$transaction(async (tx: any) => {
+      // Delete reactions of messages in channel
+      await tx.reaction.deleteMany({ where: { message: { channelId: id } } }).catch(()=>{});
+      // Delete read states referencing channel
+      await tx.channelReadState.deleteMany({ where: { channelId: id } }).catch(()=>{});
+      // Delete messages
+      await tx.message.deleteMany({ where: { channelId: id } }).catch(()=>{});
+      // Delete memberships
+      await tx.channelMember.deleteMany({ where: { channelId: id } }).catch(()=>{});
+      // Finally delete channel
+      return tx.channel.delete({ where: { id } });
+    });
   }
 }

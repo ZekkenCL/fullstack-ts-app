@@ -137,6 +137,9 @@ export function useChannel(channelId: number | null) {
   const messagesRef = useRef<ChannelMessage[]>([]);
   const msgStore = useMessagesStore();
   const timersRef = useRef<Record<string, any>>({});
+  // Retry metadata: tempId -> { attempts, nextDelay }
+  const retryMetaRef = useRef<Record<string, { attempts: number; nextDelay: number; auto: boolean }>>({});
+  const RETRY_MAX_ATTEMPTS = 4;
   const currentChannelRef = useRef<number | null>(null);
   const FAILURE_TIMEOUT = 5000; // ms
   // hydrate from cache when channel changes
@@ -296,8 +299,17 @@ export function useChannel(channelId: number | null) {
   socketManager.emit('sendMessage', { channelId, content, clientMsgId: tempId, clientSentAt: Date.now() });
     timersRef.current[tempId] = setTimeout(() => {
       setMessages(prev => {
-        const next = prev.map(m => m.tempId === tempId && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
-        if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+        let changed = false;
+        const next = prev.map(m => {
+          if (m.tempId === tempId && !m.id && m.status === 'pending') {
+            changed = true;
+            // mark failed and schedule retry metadata
+            retryMetaRef.current[tempId] = { attempts: 0, nextDelay: 1000, auto: true };
+            return { ...m, status: 'failed' } as ChannelMessage;
+          }
+          return m;
+        }) as ChannelMessage[];
+        if (changed && channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
         return next;
       });
       delete timersRef.current[tempId];
@@ -323,9 +335,85 @@ export function useChannel(channelId: number | null) {
         delete timersRef.current[newTemp];
       }, FAILURE_TIMEOUT);
       if (channelId) msgStore.setChannel(channelId, clone as ChannelMessage[]);
+      // Reset retry metadata (manual resend restarts cycle)
+      delete retryMetaRef.current[tempId];
       return clone;
     });
   }, [channelId]);
+
+  // Auto retry loop (interval) - tries messages with retryMetaRef and status failed
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMessages(prev => {
+        let changed = false;
+        const now = Date.now();
+        const next = prev.map(m => {
+          if (!m.id && m.status === 'failed' && m.tempId && retryMetaRef.current[m.tempId]?.auto) {
+            const meta = retryMetaRef.current[m.tempId];
+            if (meta.attempts < RETRY_MAX_ATTEMPTS) {
+              // Decide if it's time (we store nextDelay only; use attempts as gating)
+              // We'll trigger immediately each cycle after marking failed because we schedule via attempts & delay using setTimeout style here.
+              // Use a per-message timestamp approach: store nextRetryAt inside meta (reusing nextDelay as remaining ms if we want). For simplicity we recalc nextRetryAt separately.
+            }
+          }
+          return m;
+        }) as ChannelMessage[];
+        if (changed && channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+        return prev; // We actually handle retries outside this map to avoid complex state changes inside map; revert modifications if any.
+      });
+      // Iterate separately to avoid React state churn inside map
+      const entries = Object.entries(retryMetaRef.current);
+      for (const [tempId, meta] of entries) {
+        const msg = messagesRef.current.find(m => m.tempId === tempId);
+        if (!msg || msg.id || msg.status !== 'failed' || !meta.auto) continue;
+        if (!(meta as any).nextRetryAt) {
+          (meta as any).nextRetryAt = Date.now() + meta.nextDelay;
+        }
+        if (Date.now() >= (meta as any).nextRetryAt) {
+          if (meta.attempts >= RETRY_MAX_ATTEMPTS) {
+            meta.auto = false; // stop
+            continue;
+          }
+          // Prepare resend keeping original tempId? We need a new clientMsgId to avoid confusion on server; we map metadata to new temp.
+          const originalContent = msg.content;
+          const oldTemp = msg.tempId!;
+          const newTemp = `rt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+          // Update message to pending again
+          setMessages(prev => {
+            const updated = prev.map(m => m.tempId === oldTemp ? ({ ...m, tempId: newTemp, status: 'pending' } as ChannelMessage) : m) as ChannelMessage[];
+            if (channelId) msgStore.setChannel(channelId, updated as ChannelMessage[]);
+            return updated;
+          });
+          // Move retry meta to new tempId
+          retryMetaRef.current[newTemp] = { attempts: meta.attempts + 1, nextDelay: Math.min(meta.nextDelay * 2, 8000), auto: true };
+          delete retryMetaRef.current[oldTemp];
+          // Emit again
+          socketManager.emit('sendMessage', { channelId, content: originalContent, clientMsgId: newTemp, clientSentAt: Date.now(), retry: true, attempt: meta.attempts + 1 });
+          // Set failure timeout for this attempt
+          timersRef.current[newTemp] = setTimeout(() => {
+            setMessages(prev => {
+              const next = prev.map(m => m.tempId === newTemp && !m.id && m.status === 'pending' ? ({ ...m, status: 'failed' } as ChannelMessage) : m) as ChannelMessage[];
+              if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
+              return next;
+            });
+            delete timersRef.current[newTemp];
+          }, FAILURE_TIMEOUT);
+        }
+      }
+    }, 800); // poll ~0.8s
+    return () => clearInterval(interval);
+  }, [channelId, msgStore]);
+
+  // On socket reconnect, nudge failed messages to retry sooner by resetting their nextRetryAt to now
+  useEffect(() => {
+    const off = socketManager.on('connect', () => {
+      const entries = Object.entries(retryMetaRef.current);
+      for (const [, meta] of entries) {
+        if (meta.auto && (meta as any).nextRetryAt) (meta as any).nextRetryAt = Date.now();
+      }
+    });
+    return () => off();
+  }, []);
 
   const addReaction = useCallback((messageId: number, emoji: string) => {
     if (!channelId) return;
