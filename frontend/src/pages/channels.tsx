@@ -12,7 +12,23 @@ import { useMessagesStore } from '../store/messagesStore';
 import { Virtuoso } from 'react-virtuoso';
 
 import type { SharedChannel } from '../../../shared/src/types';
-interface Channel extends SharedChannel { unread?: number; myRole?: string }
+interface Channel extends SharedChannel { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean }
+
+// Componente aislado para renderizado markdown async (evita usar hooks dentro de itemContent de Virtuoso)
+const MessageMarkdown: React.FC<{ content: string }> = ({ content }) => {
+  const [html, setHtml] = React.useState<string | null>(null);
+  React.useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const rendered = await renderMarkdownAsync(content || '');
+        if (active) setHtml(rendered);
+      } catch { /* ignore */ }
+    })();
+    return () => { active = false; };
+  }, [content]);
+  return <div className="prose prose-invert max-w-none text-discord-text break-words text-sm" dangerouslySetInnerHTML={{ __html: html || renderMarkdown(content || '') }} />;
+};
 
 export default function ChannelsPage() {
   const { accessToken, user, clear } = useAuthStore();
@@ -209,6 +225,7 @@ export default function ChannelsPage() {
       .then(async data => { 
         if (!mounted) return; 
         setChannels(data); 
+        try { socketManager.updateChannelPrefs(data); } catch {}
         setLoading(false);
         try {
           const agg = await api.aggregatedUnreads();
@@ -308,6 +325,8 @@ export default function ChannelsPage() {
             const localUnread = channelMessages.filter(m => m.id && m.id > lastRead).length;
             const unread = c.unread !== undefined ? c.unread : localUnread;
             const active = activeChannelId === c.id;
+            const muted = c.muted;
+            const notificationsEnabled = c.notificationsEnabled !== false; // default true
             return (
               <div key={c.id} className={`group w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-left text-sm transition-colors hover:bg-discord-bg-hover ${active ? 'bg-discord-bg-hover text-discord-text' : 'text-discord-text-muted'} ${unread>0 && !active ? 'font-medium text-discord-text' : ''}`}>
                 <button onClick={() => handleChannelClick(c)} className="flex-1 flex items-center gap-2 overflow-hidden">
@@ -319,10 +338,23 @@ export default function ChannelsPage() {
                   ) : (
                     <span className="flex-1 truncate">{c.name}</span>
                   )}
+                  {muted && <span className="text-[10px] uppercase text-discord-text-muted tracking-wide">(silenciado)</span>}
                   {unread>0 && !active && (
                     <span data-testid={`unread-${c.name}`} className="ml-auto bg-discord-channel-unread-pill text-[10px] leading-none px-2 py-0.5 rounded-full font-semibold text-white">{unread}</span>
                   )}
                 </button>
+                {/* Mute toggle */}
+                <button
+                  onClick={async (e)=>{ e.stopPropagation(); try { if (!muted) { await api.muteChannel(c.id); setChannels(prev=>prev.map(ch=>ch.id===c.id?{...ch, muted: true}:ch)); socketManager.updateChannelPrefs([{ id: c.id, muted: true, notificationsEnabled }]); } else { await api.unmuteChannel(c.id); setChannels(prev=>prev.map(ch=>ch.id===c.id?{...ch, muted: false}:ch)); socketManager.updateChannelPrefs([{ id: c.id, muted: false, notificationsEnabled }]); } } catch {} }}
+                  className="opacity-0 group-hover:opacity-100 text-discord-text-muted hover:text-discord-text text-xs px-1"
+                  title={muted ? 'Quitar mute' : 'Silenciar canal'}
+                >{muted ? '🔔' : '🔕'}</button>
+                {/* Notifications toggle (distinct from mute: allows disabling passive notifications but maybe still show mention notifications) */}
+                <button
+                  onClick={async (e)=>{ e.stopPropagation(); try { const next = !notificationsEnabled; await api.setChannelNotifications(c.id, next); setChannels(prev=>prev.map(ch=>ch.id===c.id?{...ch, notificationsEnabled: next}:ch)); socketManager.updateChannelPrefs([{ id: c.id, muted, notificationsEnabled: next }]); } catch {} }}
+                  className="opacity-0 group-hover:opacity-100 text-discord-text-muted hover:text-discord-text text-xs px-1"
+                  title={notificationsEnabled ? 'Desactivar notificaciones' : 'Activar notificaciones'}
+                >{notificationsEnabled ? '💡' : '✖'}</button>
                 {c.myRole === 'owner' && (
                   <button
                     onClick={async (e) => {
@@ -439,12 +471,6 @@ export default function ChannelsPage() {
                     return acc;
                   }, {});
                   const reactionList: { emoji: string; count: number; mine: boolean; users: { id: number; username: string }[] }[] = Object.values(grouped);
-                  const [rendered, setRendered] = React.useState<string | null>(null);
-                  React.useEffect(() => {
-                    let active = true;
-                    renderMarkdownAsync(m.content || '').then(html => { if (active) setRendered(html); }).catch(()=>{});
-                    return () => { active = false; };
-                  }, [m.content]);
                   return (
                     <div data-mid={m.id} className={`group flex items-start pr-6 ${statusClass} rounded px-2 py-0.5 hover:bg-discord-bg-hover/30 relative`}> 
                       {!compact && (
@@ -469,7 +495,7 @@ export default function ChannelsPage() {
                           </form>
                         ) : (
                           <div className={`${compact ? 'pl-0' : ''}`}>
-                            <div className="prose prose-invert max-w-none text-discord-text break-words text-sm" dangerouslySetInnerHTML={{ __html: rendered || renderMarkdown(m.content || '') }} />
+                            <MessageMarkdown content={m.content || ''} />
                             {m.status === 'pending' && (
                               <span className="ml-2 text-[10px] text-discord-text-muted">
                                 enviando… {typeof (m as any).attempt === 'number' && m.attempt! > 0 && `(${m.attempt}/${m.maxAttempts})`}

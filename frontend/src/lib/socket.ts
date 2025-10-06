@@ -17,6 +17,7 @@ class SocketManager {
   private reconnecting = false;
   private lastNotify: Record<number, number> = {}; // channelId -> timestamp
   private joinedChannels = new Set<number>();
+  private channelPrefs: Record<number, { muted?: boolean; notificationsEnabled?: boolean }> = {};
 
   private get url() {
     return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
@@ -85,6 +86,9 @@ class SocketManager {
   }
 
   maybeNotify(channelId: number, title: string, body: string) {
+    const prefs = this.channelPrefs[channelId];
+    if (prefs?.muted) return; // muted cancels all
+    if (prefs && prefs.notificationsEnabled === false) return; // notifications disabled
     if (typeof window === 'undefined') return;
     if (!('Notification' in window)) return;
     if (Notification.permission !== 'granted') return;
@@ -119,6 +123,10 @@ class SocketManager {
   joinChannel(channelId: number) {
     this.joinedChannels.add(channelId);
     this.emit('joinChannel', { channelId });
+  }
+
+  updateChannelPrefs(channels: { id: number; muted?: boolean; notificationsEnabled?: boolean }[]) {
+    channels.forEach(c => { this.channelPrefs[c.id] = { muted: c.muted, notificationsEnabled: c.notificationsEnabled }; });
   }
 }
 
@@ -276,6 +284,10 @@ export function useChannel(channelId: number | null) {
         const res = await api.channelMessages(activeId, { limit: 50 });
         const serverItems = (res.items || []) as any[];
         if (serverItems.length === 0) return;
+        try {
+          // Update prefs snapshot when reconnect and we have channel list (lightweight refetch)
+          api.listChannels().then(list => { socketManager.updateChannelPrefs(list || []); }).catch(()=>{});
+        } catch {}
         setMessages(prev => {
           const existing = [...prev];
           const pending = existing.filter(m => !m.id);

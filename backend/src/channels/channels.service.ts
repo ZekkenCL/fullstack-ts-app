@@ -59,6 +59,16 @@ export class ChannelsService {
     return (this.prisma as any).channelMember.delete({ where: { userId_channelId: { userId, channelId } } }).catch(() => null);
   }
 
+  async setMute(channelId: number, userId: number, muted: boolean) {
+    await this.assertMember(channelId, userId);
+    return (this.prisma as any).channelMember.update({ where: { userId_channelId: { userId, channelId } }, data: { muted } });
+  }
+
+  async setNotifications(channelId: number, userId: number, enabled: boolean) {
+    await this.assertMember(channelId, userId);
+    return (this.prisma as any).channelMember.update({ where: { userId_channelId: { userId, channelId } }, data: { notificationsEnabled: enabled } });
+  }
+
   async update(id: number, data: Partial<{ name: string }>): Promise<ChannelEntity> {
     return (this.prisma as any).channel.update({ where: { id }, data });
   }

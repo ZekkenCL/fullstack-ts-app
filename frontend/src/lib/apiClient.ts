@@ -156,4 +156,7 @@ export const api = {
     if (params.cursor) qs.set('cursor', String(params.cursor));
     return apiRequest(`/search/messages?${qs.toString()}`, { method: 'GET', auth: true });
   },
+  muteChannel: (id: number) => apiRequest(`/channels/${id}/mute`, { method: 'POST', auth: true }),
+  unmuteChannel: (id: number) => apiRequest(`/channels/${id}/unmute`, { method: 'POST', auth: true }),
+  setChannelNotifications: (id: number, enabled: boolean) => apiRequest(`/channels/${id}/notifications`, { method: 'POST', auth: true, body: JSON.stringify({ enabled }) }),
 };

@@ -22,6 +22,8 @@ model ChannelMember {
   userId     Int
   channelId  Int
   role       String   @default("member")
+  muted      Boolean  @default(false)
+  notificationsEnabled Boolean @default(true)
   createdAt  DateTime @default(now())
   user       User     @relation(fields: [userId], references: [id])
   channel    Channel  @relation(fields: [channelId], references: [id])

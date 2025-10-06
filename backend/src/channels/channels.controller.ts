@@ -24,17 +24,17 @@ export class ChannelsController {
   ) {}
 
   @Get()
-  async getAllChannels(@Req() req: any): Promise<(ChannelEntity & { unread?: number; myRole?: string })[]> {
+  async getAllChannels(@Req() req: any): Promise<(ChannelEntity & { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean })[]> {
     const channels = await this.channelsService.findAll();
     const userId = req.user?.id;
     if (!userId) return channels;
     // For each channel membership compute unread (naive N+1; could batch optimize later)
-    const enriched: (ChannelEntity & { unread?: number; myRole?: string })[] = [];
+  const enriched: (ChannelEntity & { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean })[] = [];
     for (const c of channels) {
       try {
         const member = await this.channelsService.assertMember(c.id, userId);
         const unread = await this.readState.unreadCount(userId, c.id);
-        enriched.push({ ...c, unread, myRole: member.role });
+        enriched.push({ ...c, unread, myRole: member.role, muted: (member as any).muted, notificationsEnabled: (member as any).notificationsEnabled });
       } catch {
         enriched.push(c as any);
       }
@@ -200,5 +200,23 @@ export class ChannelsController {
   async leave(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     await this.channelsService.leave(id, req.user.id);
     return { status: 'left' };
+  }
+
+  @Post(':id/mute')
+  async mute(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    const updated = await this.channelsService.setMute(id, req.user.id, true);
+    return { status: 'ok', muted: updated.muted };
+  }
+
+  @Post(':id/unmute')
+  async unmute(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
+    const updated = await this.channelsService.setMute(id, req.user.id, false);
+    return { status: 'ok', muted: updated.muted };
+  }
+
+  @Post(':id/notifications')
+  async toggleNotifications(@Param('id', ParseIntPipe) id: number, @Body('enabled') enabled: boolean, @Req() req: any) {
+    const updated = await this.channelsService.setNotifications(id, req.user.id, Boolean(enabled));
+    return { status: 'ok', notificationsEnabled: updated.notificationsEnabled };
   }
 }

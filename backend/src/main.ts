@@ -62,7 +62,8 @@ async function bootstrap() {
   const document = SwaggerModule.createDocument(app, config);
   SwaggerModule.setup('docs', app, document, { swaggerOptions: { persistAuthorization: true } });
 
-  await app.listen(4000);
-  logger.info('Server listening on port 4000');
+  const port = parseInt(process.env.PORT || '4000', 10);
+  await app.listen(port);
+  logger.info(`Server listening on port ${port}`);
 }
 bootstrap();
