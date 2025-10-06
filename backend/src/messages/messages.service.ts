@@ -58,7 +58,7 @@ export class MessagesService {
   }
 
   /** Simple ILIKE search inside a channel with cursor (id < cursor) ordering newest->oldest then reversed */
-  async searchInChannel(channelId: number, query: string, limit = 30, cursor?: number): Promise<ChannelHistoryResult<MessageEntity>> {
+  async searchInChannel(channelId: number, query: string, limit = 30, cursor?: number): Promise<ChannelHistoryResult<any>> {
     const take = Math.min(limit, 100);
     const q = query.trim();
     if (!q) return { items: [], nextCursor: null };
@@ -81,7 +81,8 @@ export class MessagesService {
     const params: any[] = [channelId, tsQueryParam];
     if (cursor) params.push(cursor);
     const raw: any[] = await (this.prisma as any).$queryRawUnsafe(
-      `SELECT m.* FROM "Message" m
+      `SELECT m.*, ts_headline('spanish', m.content, plainto_tsquery('spanish', $2), 'StartSel=<mark>,StopSel=</mark>,MaxFragments=2,ShortWord=2,FragmentDelimiter= … ') as highlight
+       FROM "Message" m
        WHERE m.channelId = $1
          AND m.content_tsv @@ plainto_tsquery('spanish', $2)
          ${cursorClause}
@@ -104,6 +105,38 @@ export class MessagesService {
     if (!existing) throw new Error('Message not found');
     if (existing.senderId !== userId) throw new Error('Forbidden');
     return (this.prisma as any).message.delete({ where: { id } });
+  }
+
+  /** Global multi-channel search restricted to user channel memberships */
+  async globalSearch(userId: number, query: string, limit = 40, cursor?: number): Promise<ChannelHistoryResult<any>> {
+    const take = Math.min(limit, 100);
+    const q = query.trim();
+    if (!q) return { items: [], nextCursor: null };
+    // Get channelIds where user is member
+    const memberships = await (this.prisma as any).channelMember.findMany({ where: { userId }, select: { channelId: true } });
+    if (memberships.length === 0) return { items: [], nextCursor: null };
+    const ids = memberships.map((m: any) => m.channelId);
+    const cursorClause = cursor ? 'AND m.id < $3' : '';
+    const params: any[] = [ids, q];
+    if (cursor) params.push(cursor);
+    const raw: any[] = await (this.prisma as any).$queryRawUnsafe(
+      `SELECT m.*, ts_headline('spanish', m.content, plainto_tsquery('spanish', $2), 'StartSel=<mark>,StopSel=</mark>,MaxFragments=2,ShortWord=2,FragmentDelimiter= … ') as highlight
+       FROM "Message" m
+       WHERE m.channelId = ANY($1::int[])
+         AND m.content_tsv @@ plainto_tsquery('spanish', $2)
+         ${cursorClause}
+       ORDER BY m.id DESC
+       LIMIT ${take}`,
+      ...params
+    );
+    const rows = raw as MessageEntity[];
+    const items = [...rows].reverse(); // ascending
+    let nextCursor: number | null = null;
+    if (rows.length === take) {
+      const oldest = rows[rows.length - 1];
+      if (oldest) nextCursor = (oldest as any).id;
+    }
+    return { items, nextCursor };
   }
 
   async countByChannel(channelId: number): Promise<number> {

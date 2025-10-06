@@ -100,7 +100,23 @@ export class ChannelsController {
     await this.channelsService.assertMember(id, req.user.id);
     const lim = Math.max(1, Math.min(parseInt(limit || '50', 10) || 50, 100));
     const cur = cursor ? parseInt(cursor, 10) : undefined;
-    return this.messagesService.channelHistory(id, lim, cur);
+    const history = await this.messagesService.channelHistory(id, lim, cur);
+    if (history.items.length > 0) {
+      const ids = history.items.map((m: any) => m.id).filter((v: any) => typeof v === 'number');
+      if (ids.length) {
+        const reactions = await (this.channelsService as any).prismaClient.reaction.findMany({
+          where: { messageId: { in: ids } },
+          select: { messageId: true, emoji: true, userId: true, user: { select: { username: true } } },
+        });
+        const map = new Map<number, any[]>();
+        reactions.forEach((r: any) => {
+          if (!map.has(r.messageId)) map.set(r.messageId, []);
+          map.get(r.messageId)!.push({ emoji: r.emoji, userId: r.userId, username: r.user.username });
+        });
+        history.items = history.items.map((m: any) => ({ ...m, reactions: map.get(m.id) || [] }));
+      }
+    }
+    return history;
   }
 
   @Get(':id/search')
@@ -145,6 +161,16 @@ export class ChannelsController {
   @Post(':id/join')
   async join(@Param('id', ParseIntPipe) id: number, @Req() req: any) {
     return this.channelsService.join(id, req.user.id);
+  }
+
+  @Get(':id/members')
+  async members(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('q') q: string | undefined,
+    @Req() req: any,
+  ) {
+    await this.channelsService.assertMember(id, req.user.id);
+    return this.channelsService.listMembers(id, q);
   }
 
   @Post(':id/read')

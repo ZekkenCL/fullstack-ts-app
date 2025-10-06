@@ -78,4 +78,19 @@ export class ChannelsService {
       return tx.channel.delete({ where: { id } });
     });
   }
+
+  /** List members of a channel (for mentions). Optionally filter by username prefix (case-insensitive). */
+  async listMembers(channelId: number, q?: string, limit = 20) {
+    const where: any = { channelId };
+    if (q && q.trim()) {
+      where.user = { username: { startsWith: q.trim(), mode: 'insensitive' } };
+    }
+    const rows = await (this.prisma as any).channelMember.findMany({
+      where,
+      select: { userId: true, role: true, user: { select: { id: true, username: true } } },
+      orderBy: { user: { username: 'asc' } },
+      take: Math.min(Math.max(limit, 1), 50),
+    });
+    return rows.map((r: any) => ({ id: r.user.id, username: r.user.username, role: r.role }));
+  }
 }

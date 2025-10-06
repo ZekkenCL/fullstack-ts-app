@@ -1,3 +1,9 @@
+/* Menciones destacadas */
+.mention {
+  background: rgba(88,101,242,0.15);
+  padding: 0 3px;
+  border-radius: 3px;
+}
 @tailwind base;
 @tailwind components;
 @tailwind utilities;

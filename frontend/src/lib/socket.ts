@@ -130,7 +130,7 @@ import { useMessagesStore } from '../store/messagesStore';
 import type { UIMessage } from '../store/messagesStore';
 
 // Extend UIMessage ensuring optional domain fields for reconciliation
-export interface ChannelMessage extends UIMessage { raw?: any; id?: number; content?: string; channelId?: number; senderId?: number; }
+export interface ChannelMessage extends UIMessage { raw?: any; id?: number; content?: string; channelId?: number; senderId?: number; attempt?: number; maxAttempts?: number; }
 
 export function useChannel(channelId: number | null) {
   const [messages, setMessages] = useState<ChannelMessage[]>([]);
@@ -220,7 +220,7 @@ export function useChannel(channelId: number | null) {
         const existing = (m as any).reactions || [];
         if (evt.type === 'add') {
           if (existing.some((r: any) => r.emoji === evt.emoji && r.userId === evt.userId)) return m;
-          return { ...m, reactions: [...existing, { emoji: evt.emoji, userId: evt.userId }] };
+          return { ...m, reactions: [...existing, { emoji: evt.emoji, userId: evt.userId, username: evt.username }] };
         } else {
           return { ...m, reactions: existing.filter((r: any) => !(r.emoji === evt.emoji && r.userId === evt.userId)) };
         }
@@ -238,6 +238,26 @@ export function useChannel(channelId: number | null) {
         messagesRef.current = next;
         return next;
       });
+    });
+    // Evento interno de mención (enviado a toda la sala; cada cliente decide si le corresponde)
+    const offMention = socketManager.on('mentionEventInternal', (evt: any) => {
+      try {
+        const authUser = getAuthStore().getState().user;
+        if (!authUser?.id) return;
+        if (evt.mentionedUserId !== authUser.id) return; // no es para mí
+        // Incrementar unread si no estoy en ese canal o no enfocando
+        const activeId = currentChannelRef.current;
+        if (evt.channelId !== activeId) {
+          msgStore.incrementUnread(evt.channelId);
+        }
+        // Notificación visual
+        const preview = `Te mencionó @${evt.byUsername}`;
+        if (typeof document !== 'undefined' && document.hidden) {
+          socketManager.maybeNotify(evt.channelId, 'Mención', preview);
+        } else {
+          try { getUIStore().getState().push({ type: 'info', message: `[Mención] ${preview}` }); } catch {}
+        }
+      } catch {}
     });
     const offDeleted = socketManager.on('messageDeleted', (evt: any) => {
       const activeId = currentChannelRef.current;
@@ -278,7 +298,7 @@ export function useChannel(channelId: number | null) {
         });
       } catch { /* ignore */ }
     });
-    return () => { offReceived(); offAck(); offReaction(); offUpdated(); offDeleted(); offConnect(); };
+    return () => { offReceived(); offAck(); offReaction(); offUpdated(); offDeleted(); offConnect(); offMention(); };
   }, []);
 
   // Track current channel id ref & join channel on change
@@ -292,7 +312,7 @@ export function useChannel(channelId: number | null) {
   const tempId = `msg_${Date.now()}_${Math.random().toString(36).slice(2)}`;
   const authUser = getAuthStore().getState().user;
     setMessages(prev => {
-      const next = [...prev, { tempId, content, channelId, status: 'pending', createdAt: new Date().toISOString(), username: authUser?.username } as ChannelMessage];
+  const next = [...prev, { tempId, content, channelId, status: 'pending', createdAt: new Date().toISOString(), username: authUser?.username, attempt: 0, maxAttempts: RETRY_MAX_ATTEMPTS } as ChannelMessage];
       if (channelId) msgStore.setChannel(channelId, next as ChannelMessage[]);
       return next;
     });
@@ -305,7 +325,7 @@ export function useChannel(channelId: number | null) {
             changed = true;
             // mark failed and schedule retry metadata
             retryMetaRef.current[tempId] = { attempts: 0, nextDelay: 1000, auto: true };
-            return { ...m, status: 'failed' } as ChannelMessage;
+            return { ...m, status: 'failed', attempt: 0, maxAttempts: RETRY_MAX_ATTEMPTS } as ChannelMessage;
           }
           return m;
         }) as ChannelMessage[];
@@ -323,7 +343,7 @@ export function useChannel(channelId: number | null) {
       const clone = [...prev];
       const original = clone[idx];
       const newTemp = `tmp_${Date.now()}_${Math.random().toString(36).slice(2)}`;
-      clone[idx] = { ...original, tempId: newTemp, status: 'pending', createdAt: original.createdAt || new Date().toISOString() } as ChannelMessage;
+  clone[idx] = { ...original, tempId: newTemp, status: 'pending', createdAt: original.createdAt || new Date().toISOString(), attempt: 0, maxAttempts: RETRY_MAX_ATTEMPTS } as ChannelMessage;
       // emit again
   socketManager.emit('sendMessage', { channelId, content: original.content, clientMsgId: newTemp, clientSentAt: Date.now() });
       timersRef.current[newTemp] = setTimeout(() => {
@@ -380,7 +400,7 @@ export function useChannel(channelId: number | null) {
           const newTemp = `rt_${Date.now()}_${Math.random().toString(36).slice(2)}`;
           // Update message to pending again
           setMessages(prev => {
-            const updated = prev.map(m => m.tempId === oldTemp ? ({ ...m, tempId: newTemp, status: 'pending' } as ChannelMessage) : m) as ChannelMessage[];
+            const updated = prev.map(m => m.tempId === oldTemp ? ({ ...m, tempId: newTemp, status: 'pending', attempt: meta.attempts + 1, maxAttempts: RETRY_MAX_ATTEMPTS } as ChannelMessage) : m) as ChannelMessage[];
             if (channelId) msgStore.setChannel(channelId, updated as ChannelMessage[]);
             return updated;
           });

@@ -20,6 +20,9 @@ export class ReactionsService {
   }
 
   async listForMessage(messageId: number) {
-    return (this.prisma as any).reaction.findMany({ where: { messageId } });
+    return (this.prisma as any).reaction.findMany({
+      where: { messageId },
+      select: { id: true, emoji: true, userId: true, messageId: true, user: { select: { username: true } } },
+    });
   }
 }

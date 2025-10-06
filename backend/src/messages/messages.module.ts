@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { MessagesService } from './messages.service';
 import { MessagesController } from './messages.controller';
 import { ReactionsService } from './reactions.service';
@@ -11,8 +11,9 @@ import { ChannelsModule } from '../channels/channels.module';
 import { MetricsModule } from '../metrics/metrics.module';
 
 @Module({
-  imports: [PrismaModule, ChannelsModule, MetricsModule],
+  imports: [PrismaModule, forwardRef(() => ChannelsModule), MetricsModule],
   controllers: [MessagesController, ReactionsController],
   providers: [MessagesService, MessagesGateway, PresenceService, WsAuthGuard, ReactionsService],
+  exports: [MessagesService],
 })
 export class MessagesModule {}

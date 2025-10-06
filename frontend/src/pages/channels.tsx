@@ -1,10 +1,12 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ReactionChip } from '../components/reactions/ReactionChip';
+import { ReactionTooltip } from '../components/reactions/ReactionTooltip';
 import { ReactionPicker } from '../components/reactions/ReactionPicker';
-import { renderMarkdown } from '../lib/markdown';
+import { renderMarkdown, renderMarkdownAsync } from '../lib/markdown';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
+import { socketManager } from '../lib/socket';
 import { useChannel, useChannelPresence, useTyping } from '../lib/socket';
 import { useMessagesStore } from '../store/messagesStore';
 import { Virtuoso } from 'react-virtuoso';
@@ -42,14 +44,52 @@ export default function ChannelsPage() {
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [searchCursor, setSearchCursor] = useState<number | null>(null);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [globalSearch, setGlobalSearch] = useState(false);
   const [renamingId, setRenamingId] = useState<number | null>(null);
   const [renameDraft, setRenameDraft] = useState('');
+  // Reacciones tooltip
+  const [reactionHover, setReactionHover] = useState<{ emoji: string; users: { username: string }[]; x: number; y: number } | null>(null);
+  const reactionCacheRef = useRef<Record<string, { usernames: string[]; last: number }>>({}); // key = messageId|emoji
+  // Mentions state
+  const [mentionQuery, setMentionQuery] = useState('');
+  const [mentionResults, setMentionResults] = useState<{ id: number; username: string; role: string }[]>([]);
+  const [showMentions, setShowMentions] = useState(false);
+  const mentionIndexRef = useRef(0);
+  const mentionAnchorRef = useRef<HTMLDivElement | null>(null);
+
+  // Fetch mention suggestions (debounced)
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!activeChannelId || !mentionQuery) { setMentionResults([]); return; }
+      try {
+        const res = await api.channelMembers(activeChannelId, mentionQuery);
+        if (active) setMentionResults(res.slice(0, 20));
+      } catch { if (active) setMentionResults([]); }
+    };
+    const t = setTimeout(run, 140);
+    return () => { active = false; clearTimeout(t); };
+  }, [mentionQuery, activeChannelId]);
+
+  const applyMention = (username: string) => {
+    // Replace trailing @query with @username + space
+    setDraft(prev => prev.replace(/(^|\s)@([\w-]*)$/, (full, g1) => `${g1}@${username} `));
+    setShowMentions(false);
+    setMentionQuery('');
+  };
 
   const runSearch = async (reset = true) => {
-    if (!activeChannelId || !searchQuery.trim()) { setSearchResults([]); return; }
+    if (!searchQuery.trim()) { setSearchResults([]); return; }
     setSearchLoading(true);
     try {
-      const res = await api.searchChannel(activeChannelId, searchQuery.trim(), { cursor: reset ? undefined : searchCursor || undefined, limit: 30 });
+      let res;
+      if (globalSearch) {
+        res = await api.globalSearch(searchQuery.trim(), { cursor: reset ? undefined : searchCursor || undefined, limit: 40 });
+      } else if (activeChannelId) {
+        res = await api.searchChannel(activeChannelId, searchQuery.trim(), { cursor: reset ? undefined : searchCursor || undefined, limit: 30 });
+      } else {
+        setSearchResults([]); setSearchCursor(null); return;
+      }
       if (reset) {
         setSearchResults(res.items || []);
       } else {
@@ -325,7 +365,7 @@ export default function ChannelsPage() {
             <div className="flex items-center gap-2 text-sm font-medium">
               <span className="text-discord-text-muted">#</span>
               <span>Canal {activeChannelId}</span>
-              <button onClick={() => { setShowSearch(true); setTimeout(()=>{ const el=document.getElementById('channel-search-input'); el?.focus(); }, 10); }} className="ml-4 text-[11px] px-2 py-1 rounded bg-discord-bg-hover hover:bg-discord-bg-hover/70 text-discord-text-muted hover:text-discord-text">Buscar</button>
+              <button onClick={() => { setShowSearch(true); setGlobalSearch(false); setTimeout(()=>{ const el=document.getElementById('channel-search-input'); el?.focus(); }, 10); }} className="ml-4 text-[11px] px-2 py-1 rounded bg-discord-bg-hover hover:bg-discord-bg-hover/70 text-discord-text-muted hover:text-discord-text">Buscar</button>
               <span className="ml-4 text-[11px] font-normal text-discord-text-muted">{presence.length} conectados</span>
             </div>
           ) : <span className="text-sm text-discord-text-muted">Selecciona un canal</span>}
@@ -390,14 +430,21 @@ export default function ChannelsPage() {
                   const username = String(rawUsername);
                   const avatarInitial = (username || '?').toString().charAt(0).toUpperCase();
                   const reactions = (m as any).reactions || [];
-                  const grouped = reactions.reduce((acc: Record<string, { emoji: string; count: number; mine: boolean }>, r: any) => {
+                  const grouped = reactions.reduce((acc: Record<string, { emoji: string; count: number; mine: boolean; users: { id: number; username: string }[] }>, r: any) => {
                     const k = r.emoji;
-                    if (!acc[k]) acc[k] = { emoji: k, count: 0, mine: r.userId === currentUserId };
+                    if (!acc[k]) acc[k] = { emoji: k, count: 0, mine: r.userId === currentUserId, users: [] };
                     acc[k].count++;
+                    acc[k].users.push({ id: r.userId, username: r.username || `user-${r.userId}` });
                     if (r.userId === currentUserId) acc[k].mine = true;
                     return acc;
                   }, {});
-                  const reactionList: { emoji: string; count: number; mine: boolean }[] = Object.values(grouped);
+                  const reactionList: { emoji: string; count: number; mine: boolean; users: { id: number; username: string }[] }[] = Object.values(grouped);
+                  const [rendered, setRendered] = React.useState<string | null>(null);
+                  React.useEffect(() => {
+                    let active = true;
+                    renderMarkdownAsync(m.content || '').then(html => { if (active) setRendered(html); }).catch(()=>{});
+                    return () => { active = false; };
+                  }, [m.content]);
                   return (
                     <div data-mid={m.id} className={`group flex items-start pr-6 ${statusClass} rounded px-2 py-0.5 hover:bg-discord-bg-hover/30 relative`}> 
                       {!compact && (
@@ -422,14 +469,15 @@ export default function ChannelsPage() {
                           </form>
                         ) : (
                           <div className={`${compact ? 'pl-0' : ''}`}>
-                            <div
-                              className="prose prose-invert max-w-none text-discord-text break-words text-sm"
-                              dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content || '') }}
-                            />
-                            {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
+                            <div className="prose prose-invert max-w-none text-discord-text break-words text-sm" dangerouslySetInnerHTML={{ __html: rendered || renderMarkdown(m.content || '') }} />
+                            {m.status === 'pending' && (
+                              <span className="ml-2 text-[10px] text-discord-text-muted">
+                                enviando… {typeof (m as any).attempt === 'number' && m.attempt! > 0 && `(${m.attempt}/${m.maxAttempts})`}
+                              </span>
+                            )}
                             {m.status === 'failed' && (
                               <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
-                                falló
+                                falló {typeof (m as any).attempt === 'number' && m.maxAttempts ? `(${Math.min((m as any).attempt, (m as any).maxAttempts)}/${(m as any).maxAttempts})` : ''}
                                 {m.tempId && (
                                   <button onClick={() => resendMessage(m.tempId!)} className="underline hover:text-white">reintentar</button>
                                 )}
@@ -439,15 +487,47 @@ export default function ChannelsPage() {
                         )}
                         {reactionList.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-1">
-                            {reactionList.map(r => (
-                              <ReactionChip
-                                key={r.emoji}
-                                emoji={r.emoji}
-                                count={r.count}
-                                mine={r.mine}
-                                onClick={() => r.mine ? removeReaction(m.id!, r.emoji) : addReaction(m.id!, r.emoji)}
-                              />
-                            ))}
+                            {reactionList.map(r => {
+                              const handleHover = async (emoji: string, rect: DOMRect) => {
+                                if (!m.id) return;
+                                const key = `${m.id}|${emoji}`;
+                                const cached = reactionCacheRef.current[key];
+                                let usernames: string[] = [];
+                                if (cached && Date.now() - cached.last < 15000) {
+                                  usernames = cached.usernames;
+                                } else {
+                                  // Si ya tenemos usernames completos en r.users los usamos; si detectamos placeholders, hacemos fetch
+                                  const rawUsernames = r.users.map(u => u.username);
+                                  const needFetch = rawUsernames.some(name => /^user-\d+$/.test(name));
+                                  if (needFetch) {
+                                    try {
+                                      const res = await fetch(`/messages/${m.id}/reactions`, { headers: { Authorization: `Bearer ${accessToken}` } });
+                                      if (res.ok) {
+                                        const data = await res.json();
+                                        usernames = data.filter((d: any) => d.emoji === emoji).map((d: any) => d.user?.username || `user-${d.userId}`);
+                                      } else {
+                                        usernames = rawUsernames;
+                                      }
+                                    } catch { usernames = rawUsernames; }
+                                  } else {
+                                    usernames = rawUsernames;
+                                  }
+                                  reactionCacheRef.current[key] = { usernames, last: Date.now() };
+                                }
+                                setReactionHover({ emoji, users: usernames.map(u => ({ username: u })), x: rect.left, y: rect.top });
+                              };
+                              return (
+                                <ReactionChip
+                                  key={r.emoji}
+                                  emoji={r.emoji}
+                                  count={r.count}
+                                  mine={r.mine}
+                                  onClick={() => r.mine ? removeReaction(m.id!, r.emoji) : addReaction(m.id!, r.emoji)}
+                                  onHoverUsers={(emoji, rect) => handleHover(emoji, rect)}
+                                  onLeave={() => setReactionHover(prev => prev && prev.emoji === r.emoji ? null : prev)}
+                                />
+                              );
+                            })}
                           </div>
                         )}
                         <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-1 items-center">
@@ -513,7 +593,60 @@ export default function ChannelsPage() {
             </div>
             {activeChannelId && (
               <div className="p-3 border-t border-discord-border bg-discord-bg-alt flex gap-2">
-                <input value={draft} onChange={(e)=>{ setDraft(e.target.value); emitTyping(true); }} onBlur={()=>emitTyping(false)} onKeyDown={e=>{ if(e.key==='Enter' && !e.shiftKey){ e.preventDefault(); emitTyping(false); send(); } }} className="flex-1 bg-discord-input border border-discord-border rounded px-3 py-2 text-sm placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-primary/40" placeholder="Enviar mensaje" />
+                <div className="relative flex-1" ref={mentionAnchorRef}>
+                  <input
+                    value={draft}
+                    onChange={(e)=>{
+                      const val = e.target.value;
+                      setDraft(val); emitTyping(true);
+                      // Detect mention trigger
+                      const match = /(^|\s)@([\w-]{1,})$/.exec(val);
+                      if (match) {
+                        setMentionQuery(match[2]);
+                        setShowMentions(true);
+                        mentionIndexRef.current = 0;
+                      } else {
+                        setShowMentions(false);
+                        setMentionQuery('');
+                      }
+                    }}
+                    onBlur={()=>setTimeout(()=>{ emitTyping(false); setShowMentions(false); }, 150)}
+                    onKeyDown={e=>{
+                      if (showMentions && mentionResults.length) {
+                        if (e.key === 'ArrowDown') { e.preventDefault(); mentionIndexRef.current = (mentionIndexRef.current + 1) % mentionResults.length; setMentionResults(r=>[...r]); }
+                        else if (e.key === 'ArrowUp') { e.preventDefault(); mentionIndexRef.current = (mentionIndexRef.current - 1 + mentionResults.length) % mentionResults.length; setMentionResults(r=>[...r]); }
+                        else if (e.key === 'Tab') { e.preventDefault(); applyMention(mentionResults[mentionIndexRef.current].username); }
+                        else if (e.key === 'Enter' && !e.shiftKey) {
+                          if (mentionQuery) { // choose highlight if currently in mention mode
+                            const chosen = mentionResults[mentionIndexRef.current];
+                            if (chosen) { e.preventDefault(); applyMention(chosen.username); return; }
+                          }
+                        } else if (e.key === 'Escape') { setShowMentions(false); }
+                      }
+                      if(e.key==='Enter' && !e.shiftKey && !showMentions){ e.preventDefault(); emitTyping(false); send(); }
+                    }}
+                    className="w-full bg-discord-input border border-discord-border rounded px-3 py-2 text-sm placeholder:text-discord-text-muted focus:outline-none focus:ring-2 focus:ring-discord-primary/40"
+                    placeholder="Enviar mensaje (usa @ para mencionar)"
+                  />
+                  {showMentions && mentionResults.length > 0 && (
+                    <div className="absolute bottom-full mb-1 left-0 w-64 max-h-60 overflow-y-auto bg-discord-bg-alt border border-discord-border rounded shadow-lg text-xs py-1 z-50">
+                      {mentionResults.map((u, idx) => (
+                        <button
+                          key={u.id}
+                          type="button"
+                          onMouseDown={(e)=>{ e.preventDefault(); applyMention(u.username); }}
+                          className={`w-full flex items-center justify-between px-3 py-1 text-left hover:bg-discord-bg-hover ${idx===mentionIndexRef.current ? 'bg-discord-bg-hover/70 text-discord-text' : 'text-discord-text-muted'}`}
+                        >
+                          <span>@{u.username}</span>
+                          {u.role === 'owner' && <span className="text-[9px] uppercase text-discord-primary font-semibold">owner</span>}
+                        </button>
+                      ))}
+                      {mentionResults.length === 0 && (
+                        <div className="px-3 py-2 text-discord-text-muted">Sin coincidencias</div>
+                      )}
+                    </div>
+                  )}
+                </div>
                 <button onClick={send} className="bg-discord-primary hover:bg-discord-primary/90 text-white px-4 py-2 rounded text-sm font-medium">Enviar</button>
               </div>
             )}
@@ -533,7 +666,8 @@ export default function ChannelsPage() {
       <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-20" onClick={()=>setShowSearch(false)}>
         <div className="w-full max-w-2xl bg-discord-background border border-discord-border rounded-lg shadow-xl flex flex-col max-h-[70vh]" onClick={e=>e.stopPropagation()}>
           <div className="p-3 border-b border-discord-border flex items-center gap-2">
-            <input id="channel-search-input" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){ runSearch(true); } }} placeholder="Buscar en canal (Enter para buscar, Esc para cerrar)" className="flex-1 bg-discord-input border border-discord-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-discord-primary/40" />
+            <input id="channel-search-input" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){ runSearch(true); } }} placeholder={globalSearch ? "Buscar global (Enter para buscar, Esc para cerrar)" : "Buscar en canal (Enter para buscar, Esc para cerrar)"} className="flex-1 bg-discord-input border border-discord-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-discord-primary/40" />
+            <button onClick={()=>{ setGlobalSearch(g=>!g); setSearchResults([]); setSearchCursor(null); }} className={`text-xs px-2 py-1 rounded border border-discord-border ${globalSearch ? 'bg-discord-primary text-white' : 'bg-discord-bg-hover text-discord-text-muted hover:text-discord-text'}`}>{globalSearch ? 'Global' : 'Canal'}</button>
             <button disabled={searchLoading} onClick={()=>runSearch(true)} className="text-sm px-3 py-2 rounded bg-discord-primary hover:bg-discord-primary/90 text-white">{searchLoading?'...':'Buscar'}</button>
             <button onClick={()=>setShowSearch(false)} className="text-xs text-discord-text-muted hover:text-discord-danger">Cerrar</button>
           </div>
@@ -554,9 +688,10 @@ export default function ChannelsPage() {
               }} className="w-full text-left p-2 rounded hover:bg-discord-bg-hover/40 border border-transparent hover:border-discord-border">
                 <div className="flex items-center gap-2 text-[11px] text-discord-text-muted mb-0.5">
                   <span>ID {r.id}</span>
+                  {globalSearch && <span className="px-1 rounded bg-discord-bg-hover text-[10px]">ch {r.channelId}</span>}
                   <span>{new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                 </div>
-                <div className="truncate text-discord-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(r.content || '').replace(new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'ig'), (m)=>`<mark class='bg-discord-primary/40 text-white px-0.5 rounded'>${m}</mark>`) }} />
+                <div className="truncate text-discord-text" dangerouslySetInnerHTML={{ __html: (r.highlight ? r.highlight : renderMarkdown(r.content || '')) }} />
               </button>
             ))}
             {searchCursor && !searchLoading && (
@@ -566,6 +701,15 @@ export default function ChannelsPage() {
           </div>
         </div>
       </div>
+    )}
+    {reactionHover && (
+      <ReactionTooltip
+        x={reactionHover.x}
+        y={reactionHover.y}
+        emoji={reactionHover.emoji}
+        users={reactionHover.users}
+        onClose={() => setReactionHover(null)}
+      />
     )}
     </>
   );

@@ -128,6 +128,30 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     }
     // Emit to channel room (other miembros que ya se unieron)
     this.server.to(room).emit('messageReceived', enriched);
+    // Detectar menciones (@username) simples y emitir evento directo a usuarios mencionados (sin duplicar notificación para el autor)
+    try {
+      const mentionRegex = /(^|[^\w`])@([a-zA-Z0-9_\-]{2,32})/g;
+      const found = new Set<string>();
+      let match: RegExpExecArray | null;
+      while ((match = mentionRegex.exec(payload.content)) !== null) {
+        found.add(match[2].toLowerCase());
+      }
+      if (found.size > 0) {
+        // Obtener miembros del canal y mapear username -> userId
+        const memberships = await (this.channelsService as any).prismaClient.channelMember.findMany({
+          where: { channelId: payload.channelId },
+          select: { userId: true, user: { select: { username: true } } },
+        });
+        for (const m of memberships) {
+          const uname = (m.user.username || '').toLowerCase();
+            if (found.has(uname) && m.userId !== user.id) {
+              // Emitir evento dirigido al socket(s) del usuario si está conectado
+              // Reutilizamos canal general: emitimos evento global 'mention' para que el cliente decida notificar
+              this.server.to(room).emit('mentionEventInternal', { channelId: payload.channelId, messageId: (message as any).id, mentionedUserId: m.userId, by: user.id, byUsername: user.username });
+            }
+        }
+      }
+    } catch {}
     if (!(client.rooms as Set<string>).has(room)) client.emit('messageReceived', enriched);
     // También emitir un ack directo (evento separado) para que el cliente pueda reconciliar sin depender del broadcast
     client.emit('messageAck', enriched);
@@ -153,7 +177,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
     await this.reactions.addReaction(user.id, payload.messageId, payload.emoji);
     const room = `channel:${payload.channelId}`;
-    this.server.to(room).emit('reactionUpdate', { type: 'add', messageId: payload.messageId, emoji: payload.emoji, userId: user.id });
+    this.server.to(room).emit('reactionUpdate', { type: 'add', messageId: payload.messageId, emoji: payload.emoji, userId: user.id, username: user.username });
   }
 
   @SubscribeMessage('reactionRemove')
@@ -163,7 +187,7 @@ export class MessagesGateway implements OnGatewayInit, OnGatewayConnection, OnGa
     try { await this.channelsService.assertMember(payload.channelId, user.id); } catch { return; }
     await this.reactions.removeReaction(user.id, payload.messageId, payload.emoji);
     const room = `channel:${payload.channelId}`;
-    this.server.to(room).emit('reactionUpdate', { type: 'remove', messageId: payload.messageId, emoji: payload.emoji, userId: user.id });
+    this.server.to(room).emit('reactionUpdate', { type: 'remove', messageId: payload.messageId, emoji: payload.emoji, userId: user.id, username: user.username });
   }
 
   @SubscribeMessage('messageEdit')

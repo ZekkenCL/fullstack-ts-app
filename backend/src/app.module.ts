@@ -9,10 +9,11 @@ import { HealthModule } from './health/health.module';
 import { MetricsModule } from './metrics/metrics.module';
 import { RequestLoggerInterceptor } from './common/logging/request-logger.interceptor';
 import { LogLevelController } from './common/logging/log-level.controller';
+import { GlobalSearchController } from './messages/search.controller';
 
 @Module({
   imports: [ScheduleModule.forRoot(), AuthModule, UsersModule, ChannelsModule, MessagesModule, PrismaModule, HealthModule, MetricsModule],
   providers: [RequestLoggerInterceptor],
-  controllers: [LogLevelController],
+  controllers: [LogLevelController, GlobalSearchController],
 })
 export class AppModule {}

@@ -129,6 +129,11 @@ export const api = {
   deleteChannel: (id: number) => apiRequest(`/channels/${id}`, { method: 'DELETE', auth: true }),
   updateChannel: (id: number, name: string) => apiRequest(`/channels/${id}`, { method: 'PATCH', auth: true, body: JSON.stringify({ name }) }),
   leaveChannel: (id: number) => apiRequest(`/channels/${id}/leave`, { method: 'POST', auth: true }),
+  channelMembers: (id: number, q?: string) => {
+    const qs = new URLSearchParams();
+    if (q) qs.set('q', q);
+    return apiRequest(`/channels/${id}/members${qs.toString() ? `?${qs.toString()}`:''}`, { method: 'GET', auth: true });
+  },
   joinChannel: (id: number) => apiRequest(`/channels/${id}/join`, { method: 'POST', auth: true }),
   channelMessages: (id: number, params: { cursor?: number; limit?: number } = {}) => {
     const qs = new URLSearchParams();
@@ -143,5 +148,12 @@ export const api = {
     if (params.limit) qs.set('limit', String(params.limit));
     if (params.cursor) qs.set('cursor', String(params.cursor));
     return apiRequest(`/channels/${id}/search?${qs.toString()}`, { method: 'GET', auth: true });
+  },
+  globalSearch: (q: string, params: { cursor?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    qs.set('q', q);
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.cursor) qs.set('cursor', String(params.cursor));
+    return apiRequest(`/search/messages?${qs.toString()}`, { method: 'GET', auth: true });
   },
 };
