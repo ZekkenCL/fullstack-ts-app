@@ -57,6 +57,21 @@ export class MessagesService {
     return { items, nextCursor };
   }
 
+  /** Simple ILIKE search inside a channel with cursor (id < cursor) ordering newest->oldest then reversed */
+  async searchInChannel(channelId: number, query: string, limit = 30, cursor?: number): Promise<ChannelHistoryResult<MessageEntity>> {
+    const take = Math.min(limit, 100);
+    const where: any = { channelId, content: { contains: query, mode: 'insensitive' } };
+    if (cursor) where.id = { lt: cursor };
+    const rows: MessageEntity[] = await (this.prisma as any).message.findMany({ where, orderBy: { id: 'desc' }, take });
+    const items = [...rows].reverse();
+    let nextCursor: number | null = null;
+    if (rows.length === take) {
+      const oldest = rows[rows.length - 1];
+      if (oldest) nextCursor = oldest.id;
+    }
+    return { items, nextCursor };
+  }
+
   async remove(id: number, userId: number): Promise<MessageEntity> {
     const existing = await (this.prisma as any).message.findUnique({ where: { id } });
     if (!existing) throw new Error('Message not found');

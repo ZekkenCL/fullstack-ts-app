@@ -42,6 +42,48 @@ export class ChannelsController {
     return enriched;
   }
 
+  @Get('unreads/aggregate')
+  async aggregatedUnreads(@Req() req: any) {
+    const userId = req.user?.id;
+    if (!userId) return [];
+    // Fetch memberships, their last read state, and latest message id per channel
+    const memberships = await (this.channelsService as any).prismaClient.channelMember.findMany({
+      where: { userId },
+      select: { channelId: true },
+    });
+    if (memberships.length === 0) return [];
+    const channelIds = memberships.map((m: any) => m.channelId);
+    const readStates = await (this.channelsService as any).prismaClient.channelReadState.findMany({
+      where: { userId, channelId: { in: channelIds } },
+      select: { channelId: true, lastReadMessageId: true },
+    });
+    const latestMessages = await (this.channelsService as any).prismaClient.message.groupBy({
+      by: ['channelId'],
+      where: { channelId: { in: channelIds } },
+      _max: { id: true },
+    });
+    // Build map for fast lookup
+    const readMap = new Map<number, number | null>();
+    readStates.forEach((r: any) => readMap.set(r.channelId, r.lastReadMessageId));
+    const result: { channelId: number; lastReadMessageId: number | null; unread: number }[] = [];
+    for (const lm of latestMessages) {
+      const channelId = lm.channelId as number;
+      const latestId = (lm as any)._max.id as number | null;
+      const lastRead = readMap.has(channelId) ? (readMap.get(channelId) || null) : null;
+      let unread = 0;
+      if (latestId) {
+        if (!lastRead) {
+          // Count all messages
+          unread = await (this.channelsService as any).prismaClient.message.count({ where: { channelId } });
+        } else if (lastRead < latestId) {
+          unread = await (this.channelsService as any).prismaClient.message.count({ where: { channelId, id: { gt: lastRead } } });
+        }
+      }
+      result.push({ channelId, lastReadMessageId: lastRead, unread });
+    }
+    return result;
+  }
+
   @Get(':id')
   async getChannelById(@Param('id', ParseIntPipe) id: number): Promise<ChannelEntity | null> {
     return this.channelsService.findOne(id);
@@ -59,6 +101,22 @@ export class ChannelsController {
     const lim = Math.max(1, Math.min(parseInt(limit || '50', 10) || 50, 100));
     const cur = cursor ? parseInt(cursor, 10) : undefined;
     return this.messagesService.channelHistory(id, lim, cur);
+  }
+
+  @Get(':id/search')
+  async searchChannel(
+    @Param('id', ParseIntPipe) id: number,
+    @Query('q') q: string,
+    @Query('limit') limit?: string,
+    @Query('cursor') cursor?: string,
+    @Req() req?: any,
+  ) {
+    await this.channelsService.assertMember(id, req.user.id);
+    const term = (q || '').trim();
+    if (!term) return { items: [], nextCursor: null };
+    const lim = Math.max(1, Math.min(parseInt(limit || '30', 10) || 30, 100));
+    const cur = cursor ? parseInt(cursor, 10) : undefined;
+    return this.messagesService.searchInChannel(id, term, lim, cur);
   }
 
   @Post()

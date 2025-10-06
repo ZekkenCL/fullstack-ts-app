@@ -4,6 +4,7 @@ import type { SharedMessage } from '../../../shared/src/types';
 import { getUIStore } from '../store/uiStore';
 import { getAuthStore } from '../store/authStore';
 import { forceLogout } from './apiClient';
+import { api } from './apiClient';
 
 type Listener = (...args: any[]) => void;
 
@@ -14,6 +15,8 @@ class SocketManager {
   private listeners = new Map<string, Set<Listener>>();
   private buffer: PendingEmit[] = [];
   private reconnecting = false;
+  private lastNotify: Record<number, number> = {}; // channelId -> timestamp
+  private joinedChannels = new Set<number>();
 
   private get url() {
     return process.env.NEXT_PUBLIC_SOCKET_URL || 'http://localhost:4000';
@@ -30,6 +33,10 @@ class SocketManager {
   private wire() {
     if (!this.socket) return;
     this.socket.on('connect', () => {
+      // Rejoin channels after reconnect
+      this.joinedChannels.forEach(id => {
+        try { this.socket!.emit('joinChannel', { channelId: id }); } catch {}
+      });
       this.flush();
     });
     this.socket.on('disconnect', () => {
@@ -77,6 +84,21 @@ class SocketManager {
     return () => this.off(event, handler);
   }
 
+  maybeNotify(channelId: number, title: string, body: string) {
+    if (typeof window === 'undefined') return;
+    if (!('Notification' in window)) return;
+    if (Notification.permission !== 'granted') return;
+    // throttle per channel (5s)
+    const now = Date.now();
+    const last = this.lastNotify[channelId] || 0;
+    if (now - last < 5000) return;
+    this.lastNotify[channelId] = now;
+    try {
+      const n = new Notification(title, { body, tag: `ch-${channelId}` });
+      n.onclick = () => { window.focus(); }; // opcional: enfoque
+    } catch {}
+  }
+
   off(event: string, handler: Listener) {
     const set = this.listeners.get(event);
     if (set) {
@@ -95,6 +117,7 @@ class SocketManager {
   }
 
   joinChannel(channelId: number) {
+    this.joinedChannels.add(channelId);
     this.emit('joinChannel', { channelId });
   }
 }
@@ -131,7 +154,7 @@ export function useChannel(channelId: number | null) {
         setMessages(prev => {
           // Guardar contra duplicados (puede llegar duplicado si emitimos directo + room)
           if (msg.id && prev.some(p => p.id === msg.id)) return prev;
-          const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
+          const idx = prev.findIndex(m => !m.id && (m.tempId === msg.clientMsgId));
           if (idx !== -1) {
             const clone = [...prev];
             clone[idx] = { ...clone[idx], ...msg, raw: msg, id: msg.id, status: 'sent' } as ChannelMessage;
@@ -158,6 +181,14 @@ export function useChannel(channelId: number | null) {
           msgStore.setChannel(msg.channelId, [...existing, { ...msg, raw: msg, id: msg.id, status: 'sent' }]);
         }
         msgStore.incrementUnread(msg.channelId);
+        // Notificar si pestaña oculta
+        try {
+          const authUser = getAuthStore().getState().user;
+          if (document.hidden && authUser?.id !== msg.senderId) {
+            const preview = (msg.content || '').slice(0, 80);
+            socketManager.maybeNotify(msg.channelId, `Canal #${msg.channelId}`, `${msg.username || 'Usuario'}: ${preview}`);
+          }
+        } catch {}
       }
     });
     // Ack directo (si llega antes que el broadcast) para reconciliar más rápido
@@ -165,7 +196,7 @@ export function useChannel(channelId: number | null) {
       const activeId = currentChannelRef.current;
       if (msg.channelId !== activeId) return;
       setMessages(prev => {
-        const idx = prev.findIndex(m => m.status === 'pending' && !m.id && (m.tempId === msg.clientMsgId));
+        const idx = prev.findIndex(m => !m.id && (m.tempId === msg.clientMsgId));
         if (idx === -1) return prev;
         if (msg.id && prev.some(p => p.id === msg.id)) return prev; // ya reconciliado por broadcast
         const clone = [...prev];
@@ -214,7 +245,37 @@ export function useChannel(channelId: number | null) {
         return next;
       });
     });
-    return () => { offReceived(); offAck(); offReaction(); offUpdated(); offDeleted(); };
+    const offConnect = socketManager.on('connect', async () => {
+      const activeId = currentChannelRef.current;
+      if (!activeId) return;
+      try {
+        // Fetch last 50 messages to reconcile gaps missed offline
+        const res = await api.channelMessages(activeId, { limit: 50 });
+        const serverItems = (res.items || []) as any[];
+        if (serverItems.length === 0) return;
+        setMessages(prev => {
+          const existing = [...prev];
+          const pending = existing.filter(m => !m.id);
+          const stable = existing.filter(m => m.id);
+          const map = new Map<number, ChannelMessage>();
+          stable.forEach(m => { if (m.id) map.set(m.id, m); });
+          serverItems.forEach(s => {
+            if (s.id && map.has(s.id)) {
+              // Merge minimal fields (content/createdAt/updatedAt)
+              map.set(s.id, { ...map.get(s.id)!, content: s.content, createdAt: s.createdAt, updatedAt: s.updatedAt, username: s.username || (map.get(s.id) as any)?.username } as ChannelMessage);
+            } else if (s.id) {
+              map.set(s.id, { ...s, id: s.id, status: 'sent' } as ChannelMessage);
+            }
+          });
+          const mergedStable = Array.from(map.values()).sort((a,b)=>(a.id! - b.id!));
+          const next = [...mergedStable, ...pending];
+          if (activeId) msgStore.setChannel(activeId, next as ChannelMessage[]);
+          messagesRef.current = next as ChannelMessage[];
+          return next;
+        });
+      } catch { /* ignore */ }
+    });
+    return () => { offReceived(); offAck(); offReaction(); offUpdated(); offDeleted(); offConnect(); };
   }, []);
 
   // Track current channel id ref & join channel on change

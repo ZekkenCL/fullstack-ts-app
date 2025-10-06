@@ -36,6 +36,10 @@ function AuthBootstrap({ children }: { children: React.ReactNode }) {
         if (needsAuth) router.replace('/login');
       });
     }
+    // Solicitar permiso de notificaciones una vez autenticado
+    if (accessToken && typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'default') {
+      try { Notification.requestPermission().catch(()=>{}); } catch {}
+    }
   }, [hydrated, accessToken, user, router, setUser, clear]);
 
   return <>{children}</>;

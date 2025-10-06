@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { ReactionChip } from '../components/reactions/ReactionChip';
 import { ReactionPicker } from '../components/reactions/ReactionPicker';
+import { renderMarkdown } from '../lib/markdown';
 import { useRouter } from 'next/router';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../lib/apiClient';
@@ -34,6 +35,39 @@ export default function ChannelsPage() {
   const [picker, setPicker] = useState<{ x: number; y: number; messageId: number } | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingText, setEditingText] = useState('');
+  const [showSearch, setShowSearch] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchCursor, setSearchCursor] = useState<number | null>(null);
+  const [searchLoading, setSearchLoading] = useState(false);
+
+  const runSearch = async (reset = true) => {
+    if (!activeChannelId || !searchQuery.trim()) { setSearchResults([]); return; }
+    setSearchLoading(true);
+    try {
+      const res = await api.searchChannel(activeChannelId, searchQuery.trim(), { cursor: reset ? undefined : searchCursor || undefined, limit: 30 });
+      if (reset) {
+        setSearchResults(res.items || []);
+      } else {
+        setSearchResults(prev => [...prev, ...(res.items||[])]);
+      }
+      setSearchCursor(res.nextCursor);
+    } catch {} finally { setSearchLoading(false); }
+  };
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setShowSearch(s => !s);
+      }
+      if (e.key === 'Escape') {
+        setShowSearch(false);
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
   
   const formatTime = (iso?: string) => {
     if (!iso) return '';
@@ -161,7 +195,24 @@ export default function ChannelsPage() {
     }
     let mounted = true;
     api.listChannels()
-      .then(data => { if (mounted) { setChannels(data); setLoading(false); } })
+      .then(async data => { 
+        if (!mounted) return; 
+        setChannels(data); 
+        setLoading(false);
+        try {
+          const agg = await api.aggregatedUnreads();
+          if (!mounted) return;
+          if (Array.isArray(agg)) {
+            setChannels(prev => prev.map(c => {
+              const found = agg.find((a:any)=>a.channelId === c.id);
+              if (found) return { ...c, unread: found.unread };
+              return c;
+            }));
+            // Sync lastRead map locally también
+            agg.forEach((a:any) => { if (a.lastReadMessageId) msgStore.markRead(a.channelId, a.lastReadMessageId); });
+          }
+        } catch {}
+      })
       .catch(e => { if (mounted) { setError(e.message); setLoading(false); } });
     return () => { mounted = false; };
   }, [accessToken, router]);
@@ -265,6 +316,7 @@ export default function ChannelsPage() {
             <div className="flex items-center gap-2 text-sm font-medium">
               <span className="text-discord-text-muted">#</span>
               <span>Canal {activeChannelId}</span>
+              <button onClick={() => { setShowSearch(true); setTimeout(()=>{ const el=document.getElementById('channel-search-input'); el?.focus(); }, 10); }} className="ml-4 text-[11px] px-2 py-1 rounded bg-discord-bg-hover hover:bg-discord-bg-hover/70 text-discord-text-muted hover:text-discord-text">Buscar</button>
               <span className="ml-4 text-[11px] font-normal text-discord-text-muted">{presence.length} conectados</span>
             </div>
           ) : <span className="text-sm text-discord-text-muted">Selecciona un canal</span>}
@@ -340,8 +392,11 @@ export default function ChannelsPage() {
                               </div>
                             </form>
                           ) : (
-                            <div className={`text-discord-text whitespace-pre-wrap break-words ${compact ? 'pl-0' : ''}`}>
-                              {m.content}
+                            <div className={`${compact ? 'pl-0' : ''}`}>
+                              <div
+                                className="prose prose-invert max-w-none text-discord-text break-words text-sm"
+                                dangerouslySetInnerHTML={{ __html: renderMarkdown(m.content || '') }}
+                              />
                               {m.status === 'pending' && <span className="ml-2 text-[10px] text-discord-text-muted">enviando…</span>}
                               {m.status === 'failed' && (
                                 <span className="ml-2 text-[10px] flex items-center gap-2 text-discord-danger">
@@ -424,6 +479,44 @@ export default function ChannelsPage() {
         onSelect={(emoji) => { if (picker) addReaction(picker.messageId, emoji); }}
         onClose={() => setPicker(null)}
       />
+    )}
+    {showSearch && (
+      <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-start justify-center pt-20" onClick={()=>setShowSearch(false)}>
+        <div className="w-full max-w-2xl bg-discord-background border border-discord-border rounded-lg shadow-xl flex flex-col max-h-[70vh]" onClick={e=>e.stopPropagation()}>
+          <div className="p-3 border-b border-discord-border flex items-center gap-2">
+            <input id="channel-search-input" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} onKeyDown={e=>{ if(e.key==='Enter'){ runSearch(true); } }} placeholder="Buscar en canal (Enter para buscar, Esc para cerrar)" className="flex-1 bg-discord-input border border-discord-border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-discord-primary/40" />
+            <button disabled={searchLoading} onClick={()=>runSearch(true)} className="text-sm px-3 py-2 rounded bg-discord-primary hover:bg-discord-primary/90 text-white">{searchLoading?'...':'Buscar'}</button>
+            <button onClick={()=>setShowSearch(false)} className="text-xs text-discord-text-muted hover:text-discord-danger">Cerrar</button>
+          </div>
+          <div className="overflow-y-auto px-4 py-3 space-y-2 text-sm">
+            {searchResults.length === 0 && !searchLoading && <p className="text-[11px] text-discord-text-muted">Sin resultados.</p>}
+            {searchResults.map(r => (
+              <button key={r.id} onClick={() => {
+                setShowSearch(false);
+                // Intentar scroll en la lista principal si existe
+                const target = document.querySelector(`[data-mid='${r.id}']`);
+                if (target && target instanceof HTMLElement) {
+                  target.scrollIntoView({ block: 'center' });
+                  target.classList.add('ring-1','ring-discord-primary');
+                  setTimeout(()=>target.classList.remove('ring-1','ring-discord-primary'), 1400);
+                } else {
+                  // fallback: si no está cargado, puedes implementar fetch y luego posicionar (pendiente)
+                }
+              }} className="w-full text-left p-2 rounded hover:bg-discord-bg-hover/40 border border-transparent hover:border-discord-border">
+                <div className="flex items-center gap-2 text-[11px] text-discord-text-muted mb-0.5">
+                  <span>ID {r.id}</span>
+                  <span>{new Date(r.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                </div>
+                <div className="truncate text-discord-text" dangerouslySetInnerHTML={{ __html: renderMarkdown(r.content || '').replace(new RegExp(searchQuery.replace(/[.*+?^${}()|[\]\\]/g,'\\$&'),'ig'), (m)=>`<mark class='bg-discord-primary/40 text-white px-0.5 rounded'>${m}</mark>`) }} />
+              </button>
+            ))}
+            {searchCursor && !searchLoading && (
+              <button onClick={()=>runSearch(false)} className="text-[11px] px-3 py-1 rounded bg-discord-bg-hover hover:bg-discord-bg-hover/70">Cargar más</button>
+            )}
+            {searchLoading && <p className="text-[11px] text-discord-text-muted">Buscando...</p>}
+          </div>
+        </div>
+      </div>
     )}
     </>
   );

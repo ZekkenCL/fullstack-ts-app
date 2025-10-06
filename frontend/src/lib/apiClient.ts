@@ -123,6 +123,7 @@ export const api = {
   login: (username: string, password: string) => apiRequest('/auth/login', { method: 'POST', body: JSON.stringify({ username, password }) }),
   profile: () => apiRequest('/auth/profile', { method: 'POST', auth: true }),
   listChannels: () => apiRequest('/channels', { method: 'GET', auth: true }),
+  aggregatedUnreads: () => apiRequest('/channels/unreads/aggregate', { method: 'GET', auth: true }),
   markChannelRead: (id: number, messageId?: number) => apiRequest(`/channels/${id}/read`, { method: 'POST', auth: true, body: JSON.stringify(messageId ? { messageId } : {}) }),
   createChannel: (name: string) => apiRequest('/channels', { method: 'POST', auth: true, body: JSON.stringify({ name }) }),
   joinChannel: (id: number) => apiRequest(`/channels/${id}/join`, { method: 'POST', auth: true }),
@@ -132,5 +133,12 @@ export const api = {
     if (params.cursor) qs.set('cursor', String(params.cursor));
     const q = qs.toString();
     return apiRequest(`/channels/${id}/messages${q ? `?${q}`:''}`, { method: 'GET', auth: true });
+  },
+  searchChannel: (id: number, q: string, params: { cursor?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams();
+    qs.set('q', q);
+    if (params.limit) qs.set('limit', String(params.limit));
+    if (params.cursor) qs.set('cursor', String(params.cursor));
+    return apiRequest(`/channels/${id}/search?${qs.toString()}`, { method: 'GET', auth: true });
   },
 };
