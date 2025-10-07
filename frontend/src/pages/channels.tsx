@@ -14,6 +14,7 @@ import { Virtuoso } from 'react-virtuoso';
 import type { SharedChannel } from '../../../shared/src/types';
 import UserAvatar from '../components/UserAvatar';
 import AvatarUploader from '../components/AvatarUploader';
+import UserHoverCard from '../components/UserHoverCard';
 interface Channel extends SharedChannel { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean }
 
 // Componente aislado para renderizado markdown async (evita usar hooks dentro de itemContent de Virtuoso)
@@ -68,6 +69,9 @@ export default function ChannelsPage() {
   // Member list (right sidebar)
   const [members, setMembers] = useState<{ id: number; username: string; role: string; avatarUrl?: string | null }[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  // Hover card usuario
+  const [hoverUser, setHoverUser] = useState<{ id: number; username: string; role?: string; avatarUrl?: string | null } | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
 
   // --- Role & avatar color helpers ---
   const roleStyle = (role?: string) => {
@@ -211,10 +215,27 @@ export default function ChannelsPage() {
       <div className={`px-4 py-[2px] hover:bg-discord-bg-hover/30 rounded-md ${item.compact ? 'pl-14' : ''}`}>
         {!item.compact && (
           <div className="flex items-start gap-3">
-            <UserAvatar username={username} avatarUrl={avatarUrl} size={40} />
+            <div
+              onClick={(e) => {
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                setHoverUser(prev => prev && prev.id === m.senderId ? null : { id: m.senderId, username, role: m.role, avatarUrl });
+                setHoverPos({ x: rect.left, y: rect.top });
+              }}
+              className="cursor-pointer"
+            >
+              <UserAvatar username={username} avatarUrl={avatarUrl} size={40} />
+            </div>
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 text-sm">
-                <span className={`font-medium ${m.role==='owner' ? 'text-[#e3b341]' : 'text-discord-text'}`}>{username}</span>
+                <button
+                  type="button"
+                  className={`font-medium cursor-pointer text-left ${m.role==='owner' ? 'text-[#e3b341]' : 'text-discord-text'}`}
+                  onClick={(e) => {
+                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                    setHoverUser(prev => prev && prev.id === m.senderId ? null : { id: m.senderId, username, role: m.role, avatarUrl });
+                    setHoverPos({ x: rect.left, y: rect.top });
+                  }}
+                >{username}</button>
                 <span className="text-[11px] text-discord-text-muted">{formatTime(m.createdAt)}</span>
               </div>
               <MessageMarkdown content={m.content} />
@@ -715,7 +736,17 @@ export default function ChannelsPage() {
                             const online = onlineSet.has(m.id);
                             return (
                               <li key={m.id} className="flex items-center gap-2 text-xs text-discord-text">
-                                <UserAvatar username={m.username} avatarUrl={m.avatarUrl} size={24} />
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                    setHoverUser(prev => prev && prev.id === m.id ? null : { id: m.id, username: m.username, role: m.role, avatarUrl: m.avatarUrl });
+                                    setHoverPos({ x: rect.left, y: rect.top });
+                                  }}
+                                  className="cursor-pointer"
+                                >
+                                  <UserAvatar username={m.username} avatarUrl={m.avatarUrl} size={24} />
+                                </button>
                                 <div className="flex-1 min-w-0">
                                   <span className={`truncate ${m.role==='owner' ? 'text-[#e3b341] font-semibold' : ''}`}>{m.username}</span>
                                   {m.role==='owner' && <span className="ml-1 text-[8px] uppercase tracking-wide text-[#e3b341]">owner</span>}
@@ -795,6 +826,20 @@ export default function ChannelsPage() {
         emoji={reactionHover.emoji}
         users={reactionHover.users}
         onClose={() => setReactionHover(null)}
+      />
+    )}
+    {hoverUser && hoverPos && (
+      <UserHoverCard
+        user={{ ...hoverUser, online: presence.some(p=>p.userId===hoverUser.id) }}
+        x={hoverPos.x}
+        y={hoverPos.y}
+        currentUserId={user?.id ?? null}
+        onClose={() => { setHoverUser(null); setHoverPos(null); }}
+        onMention={(uname) => {
+          setDraft(d => d + (d.endsWith(' ') || d === '' ? '' : ' ') + `@${uname} `);
+          const input = document.querySelector('input[placeholder^="Enviar mensaje"]') as HTMLInputElement | null;
+          if (input) input.focus();
+        }}
       />
     )}
     </>
