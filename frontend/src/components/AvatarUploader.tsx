@@ -19,9 +19,12 @@ export const AvatarUploader: React.FC<Props> = ({ className='' }) => {
     setUploading(true);
     try {
   const res = await api.uploadAvatar(file);
-  // cache buster para que el navegador no muestre versión antigua
   const bust = res.avatarUrl + (res.avatarUrl.includes('?') ? '&' : '?') + 'v=' + Date.now();
   setUser({ ...user, avatarUrl: bust });
+  // Emitir evento global para que páginas puedan actualizar mensajes existentes
+  try {
+    window.dispatchEvent(new CustomEvent('avatar-updated', { detail: { userId: user.id, avatarUrl: bust } }));
+  } catch {}
     } catch (err: any) {
       setError(err?.message || 'Error al subir');
     } finally { setUploading(false); }

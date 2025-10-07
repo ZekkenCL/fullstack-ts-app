@@ -19,6 +19,11 @@ export const UserAvatar: React.FC<Props> = ({ username, avatarUrl, size = 32, cl
     const base = (process.env.NEXT_PUBLIC_API_URL || 'http://localhost:4000').replace(/\/$/, '');
     resolved = base + resolved;
   }
+  // Debug temporal (se puede retirar luego)
+  if (process.env.NODE_ENV !== 'production') {
+    // eslint-disable-next-line no-console
+    if (avatarUrl && !resolved) console.log('[UserAvatar] avatarUrl sin resolver', avatarUrl);
+  }
   if (resolved) {
     return <img src={resolved} alt={username} width={size} height={size} className={`rounded-full object-cover ${className}`} style={style} />;
   }

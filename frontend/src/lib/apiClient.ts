@@ -172,4 +172,5 @@ export const api = {
     if (!res.ok) throw await parseError(res);
     return res.json();
   },
+  updateProfile: (data: { username?: string }) => apiRequest('/users/me', { method: 'PATCH', auth: true, body: JSON.stringify(data) }),
 };

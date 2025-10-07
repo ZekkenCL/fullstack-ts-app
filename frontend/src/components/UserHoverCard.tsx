@@ -96,7 +96,7 @@ export const UserHoverCard: React.FC<UserHoverCardProps> = ({ user, x, y, onClos
           )}
           {currentUserId === user.id && (
             <button
-              onClick={() => { /* TODO: abrir modal edición perfil */ onClose(); }}
+              onClick={() => { try { window.dispatchEvent(new CustomEvent('open-edit-profile')); } catch {}; onClose(); }}
               className="mt-4 w-full text-sm font-medium bg-discord-bg-hover hover:bg-discord-bg-hover/70 text-discord-text py-2 rounded border border-discord-border transition-colors"
             >
               Editar perfil

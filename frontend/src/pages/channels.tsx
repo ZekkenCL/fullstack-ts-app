@@ -15,6 +15,7 @@ import type { SharedChannel } from '../../../shared/src/types';
 import UserAvatar from '../components/UserAvatar';
 import AvatarUploader from '../components/AvatarUploader';
 import UserHoverCard from '../components/UserHoverCard';
+import EditProfileModal from '../components/EditProfileModal';
 interface Channel extends SharedChannel { unread?: number; myRole?: string; muted?: boolean; notificationsEnabled?: boolean }
 
 // Componente aislado para renderizado markdown async (evita usar hooks dentro de itemContent de Virtuoso)
@@ -69,6 +70,24 @@ export default function ChannelsPage() {
   // Member list (right sidebar)
   const [members, setMembers] = useState<{ id: number; username: string; role: string; avatarUrl?: string | null }[]>([]);
   const [membersLoading, setMembersLoading] = useState(false);
+  // Refetch control para mensajes sin avatar/username
+  const refetchAttemptedRef = useRef<Record<number, boolean>>({});
+  const [showEditProfile, setShowEditProfile] = useState(false);
+  // Estado de colapso de grupos miembros (persistente)
+  const [memberGroupsCollapsed, setMemberGroupsCollapsed] = useState<Record<string, boolean>>({});
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem('memberGroupsCollapsed');
+      if (raw) setMemberGroupsCollapsed(JSON.parse(raw));
+    } catch {}
+  }, []);
+  const toggleGroup = (key: string) => {
+    setMemberGroupsCollapsed(prev => {
+      const next = { ...prev, [key]: !prev[key] };
+      try { localStorage.setItem('memberGroupsCollapsed', JSON.stringify(next)); } catch {}
+      return next;
+    });
+  };
   // Hover card usuario
   const [hoverUser, setHoverUser] = useState<{ id: number; username: string; role?: string; avatarUrl?: string | null } | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
@@ -154,6 +173,32 @@ export default function ChannelsPage() {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
+
+  // Listener para actualización optimista de avatar propio o de otros
+  useEffect(() => {
+    const onAvatar = (ev: any) => {
+      const { userId, avatarUrl } = ev.detail || {};
+      if (!userId || !avatarUrl) return;
+      // Recorrer canales que ya están en memoria y actualizar mensajes
+      const state = msgStore.byChannel;
+      Object.keys(state).forEach(key => {
+        const cid = Number(key);
+        const list = state[cid];
+        if (!list || list.length === 0) return;
+        const changed = list.some(m => m.senderId === userId);
+        if (!changed) return;
+        const updated = list.map(m => m.senderId === userId ? { ...m, avatarUrl } : m);
+        msgStore.setChannel(cid, updated as any);
+      });
+    };
+    const onOpenEdit = () => setShowEditProfile(true);
+    window.addEventListener('avatar-updated', onAvatar);
+    window.addEventListener('open-edit-profile', onOpenEdit);
+    return () => {
+      window.removeEventListener('avatar-updated', onAvatar);
+      window.removeEventListener('open-edit-profile', onOpenEdit);
+    };
+  }, [msgStore]);
   
   const formatTime = (iso?: string) => {
     if (!iso) return '';
@@ -208,24 +253,33 @@ export default function ChannelsPage() {
 
   const renderMessageRow = (item: MessageItem) => {
     const m = item.m;
-    const showHeader = !item.compact;
-    const avatarUrl = m.avatarUrl || m.sender?.avatarUrl;
-    const username = m.username || m.sender?.username || '???';
+    const showHeader = !item.compact; // compact ahora solo controla cabecera, NO ocultamos avatar
+    // Algunos mensajes antiguos en el store pueden no tener username/avatar (antes del include sender) -> fallback con lista de miembros
+    let avatarUrl = m.avatarUrl || m.sender?.avatarUrl;
+    let username = m.username || m.sender?.username;
+    if (!username) {
+      const mem = members.find(mm => mm.id === m.senderId);
+      if (mem) {
+        username = mem.username;
+        avatarUrl = avatarUrl || mem.avatarUrl;
+      }
+    }
+    if (!username) username = '???';
     return (
-      <div className={`px-4 py-[2px] hover:bg-discord-bg-hover/30 rounded-md ${item.compact ? 'pl-14' : ''}`}>
-        {!item.compact && (
-          <div className="flex items-start gap-3">
-            <div
-              onClick={(e) => {
-                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                setHoverUser(prev => prev && prev.id === m.senderId ? null : { id: m.senderId, username, role: m.role, avatarUrl });
-                setHoverPos({ x: rect.left, y: rect.top });
-              }}
-              className="cursor-pointer"
-            >
-              <UserAvatar username={username} avatarUrl={avatarUrl} size={40} />
-            </div>
-            <div className="flex-1 min-w-0">
+      <div className="px-4 py-[2px] hover:bg-discord-bg-hover/30 rounded-md">
+        <div className="flex items-start gap-3">
+          <div
+            onClick={(e) => {
+              const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+              setHoverUser(prev => prev && prev.id === m.senderId ? null : { id: m.senderId, username, role: m.role, avatarUrl });
+              setHoverPos({ x: rect.left, y: rect.top });
+            }}
+            className="cursor-pointer shrink-0"
+          >
+            <UserAvatar username={username} avatarUrl={avatarUrl} size={40} />
+          </div>
+          <div className="flex-1 min-w-0">
+            {showHeader && (
               <div className="flex items-center gap-2 text-sm">
                 <button
                   type="button"
@@ -238,18 +292,43 @@ export default function ChannelsPage() {
                 >{username}</button>
                 <span className="text-[11px] text-discord-text-muted">{formatTime(m.createdAt)}</span>
               </div>
-              <MessageMarkdown content={m.content} />
-            </div>
-          </div>
-        )}
-        {item.compact && (
-          <div className="pl-14 text-sm">
+            )}
+            {!showHeader && (
+              <div className="h-[4px]" />
+            )}
             <MessageMarkdown content={m.content} />
           </div>
-        )}
+        </div>
       </div>
     );
   };
+
+  // Refetch automático si detectamos mensajes sin username/avatar (mensajes antiguos antes de enrichment)
+  useEffect(() => {
+    if (!activeChannelId) return;
+    const channelId = activeChannelId;
+    if (refetchAttemptedRef.current[channelId]) return;
+    if (!messages || messages.length === 0) return;
+    const needsRefetch = messages.some(m => {
+      const mm: any = m;
+      return mm && mm.senderId && (!mm.username || (!mm.avatarUrl && !(mm.sender && mm.sender.avatarUrl)));
+    });
+    if (!needsRefetch) return;
+    refetchAttemptedRef.current[channelId] = true;
+    (async () => {
+      try {
+        const limit = Math.max(messages.length, 60);
+        const res = await api.channelMessages(channelId, { limit });
+        if (res?.items) {
+          // Mantener mensajes optimistas (pending) que aún no recibieron id
+            const pending = messages.filter(m => !m.id);
+            msgStore.setChannel(channelId, [...res.items, ...pending]);
+        }
+      } catch {
+        // silencioso
+      }
+    })();
+  }, [activeChannelId, messages]);
 
   const toggleReaction = async (messageId: number, emoji: string) => {
     try {
@@ -722,46 +801,94 @@ export default function ChannelsPage() {
               {!membersLoading && members.length === 0 && activeChannelId && (
                 <p className="text-[11px] text-discord-text-muted">Sin miembros.</p>
               )}
-              {members.length > 0 && (
-                <div className="space-y-4">
-                  {(() => {
-                    const onlineSet = new Set(presence.map(p=>p.userId));
-                    const owners = members.filter(m=>m.role==='owner');
-                    const others = members.filter(m=>m.role!=='owner');
-                    const renderGroup = (title: string, list: typeof members) => (
-                      <div key={title}>
-                        <p className="text-[10px] font-semibold text-discord-text-muted mb-1 uppercase tracking-wide">{title} — {list.length}</p>
-                        <ul className="space-y-1">
-                          {list.map(m => {
-                            const online = onlineSet.has(m.id);
-                            return (
-                              <li key={m.id} className="flex items-center gap-2 text-xs text-discord-text">
-                                <button
-                                  type="button"
-                                  onClick={(e) => {
-                                    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                    setHoverUser(prev => prev && prev.id === m.id ? null : { id: m.id, username: m.username, role: m.role, avatarUrl: m.avatarUrl });
-                                    setHoverPos({ x: rect.left, y: rect.top });
-                                  }}
-                                  className="cursor-pointer"
-                                >
-                                  <UserAvatar username={m.username} avatarUrl={m.avatarUrl} size={24} />
-                                </button>
-                                <div className="flex-1 min-w-0">
-                                  <span className={`truncate ${m.role==='owner' ? 'text-[#e3b341] font-semibold' : ''}`}>{m.username}</span>
-                                  {m.role==='owner' && <span className="ml-1 text-[8px] uppercase tracking-wide text-[#e3b341]">owner</span>}
-                                </div>
-                                <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : 'bg-gray-500'}`} title={online ? 'En línea':'Desconectado'}></span>
-                              </li>
-                            );
-                          })}
-                        </ul>
+              {members.length > 0 && (() => {
+                const onlineSet = new Set(presence.map(p=>p.userId));
+                // Agrupar por rol
+                interface Group { key: string; title: string; members: typeof members }
+                const rolesMap: Record<string, { members: typeof members; online: number; offline: number }> = {};
+                for (const m of members) {
+                  const r = m.role || 'miembro';
+                  if (!rolesMap[r]) rolesMap[r] = { members: [], online: 0, offline: 0 };
+                  rolesMap[r].members.push(m);
+                  if (onlineSet.has(m.id)) rolesMap[r].online++; else rolesMap[r].offline++;
+                }
+                // Orden: owner primero, luego resto alfa
+                const roleKeys = Object.keys(rolesMap).sort((a,b) => {
+                  if (a==='owner') return -1; if (b==='owner') return 1; return a.localeCompare(b);
+                });
+                const renderMemberRow = (m: typeof members[number]) => {
+                  const online = onlineSet.has(m.id);
+                  return (
+                    <li key={m.id} className="flex items-center gap-2 text-xs text-discord-text">
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                          setHoverUser(prev => prev && prev.id === m.id ? null : { id: m.id, username: m.username, role: m.role, avatarUrl: m.avatarUrl });
+                          setHoverPos({ x: rect.left, y: rect.top });
+                        }}
+                        className="cursor-pointer"
+                      >
+                        <UserAvatar username={m.username} avatarUrl={m.avatarUrl} size={24} />
+                      </button>
+                      <div className="flex-1 min-w-0">
+                        <span className={`truncate ${m.role==='owner' ? 'text-[#e3b341] font-semibold' : ''}`}>{m.username}</span>
+                        {m.role==='owner' && <span className="ml-1 text-[8px] uppercase tracking-wide text-[#e3b341]">owner</span>}
                       </div>
-                    );
-                    return <>{owners.length>0 && renderGroup('Owner', owners)}{others.length>0 && renderGroup('Miembros', others)}</>;
-                  })()}
-                </div>
-              )}
+                      <span className={`w-2 h-2 rounded-full ${online ? 'bg-green-500' : 'bg-gray-500'}`} title={online ? 'En línea':'Desconectado'}></span>
+                    </li>
+                  );
+                };
+                return (
+                  <div className="space-y-4">
+                    {roleKeys.map(roleKey => {
+                      const group = rolesMap[roleKey];
+                      const keyOnline = roleKey + '__online';
+                      const keyOffline = roleKey + '__offline';
+                      const onlineMembers = group.members.filter(m=>onlineSet.has(m.id));
+                      const offlineMembers = group.members.filter(m=>!onlineSet.has(m.id));
+                      return (
+                        <div key={roleKey} className="space-y-2">
+                          {onlineMembers.length > 0 && (
+                            <div>
+                              <button
+                                type="button"
+                                onClick={()=>toggleGroup(keyOnline)}
+                                className="w-full flex items-center justify-between text-[10px] font-semibold text-discord-text-muted uppercase tracking-wide hover:text-discord-text"
+                              >
+                                <span>{roleKey} — ONLINE {onlineMembers.length}</span>
+                                <span className={`transition-transform ${memberGroupsCollapsed[keyOnline] ? '-rotate-90' : ''}`}>▾</span>
+                              </button>
+                              {!memberGroupsCollapsed[keyOnline] && (
+                                <ul className="mt-1 space-y-1">
+                                  {onlineMembers.map(renderMemberRow)}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                          {offlineMembers.length > 0 && (
+                            <div>
+                              <button
+                                type="button"
+                                onClick={()=>toggleGroup(keyOffline)}
+                                className="w-full flex items-center justify-between text-[10px] font-semibold text-discord-text-muted uppercase tracking-wide hover:text-discord-text"
+                              >
+                                <span>{roleKey} — OFFLINE {offlineMembers.length}</span>
+                                <span className={`transition-transform ${memberGroupsCollapsed[keyOffline] ? '-rotate-90' : ''}`}>▾</span>
+                              </button>
+                              {!memberGroupsCollapsed[keyOffline] && (
+                                <ul className="mt-1 space-y-1 opacity-70">
+                                  {offlineMembers.map(renderMemberRow)}
+                                </ul>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                );
+              })()}
             </div>
             {/* Zona de perfil / subir avatar */}
             <div className="p-3 border-t border-discord-border">
@@ -842,6 +969,7 @@ export default function ChannelsPage() {
         }}
       />
     )}
+    {showEditProfile && <EditProfileModal open={showEditProfile} onClose={()=>setShowEditProfile(false)} />}
     </>
   );
 }

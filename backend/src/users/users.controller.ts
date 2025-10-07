@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, UseInterceptors, UploadedFile, UseGuards, Req, BadRequestException } from '@nestjs/common';
+import { Controller, Get, Post, Patch, Body, Param, UseInterceptors, UploadedFile, UseGuards, Req, BadRequestException } from '@nestjs/common';
 import { UsersService } from './users.service';
 import { CreateUserDto } from './dto/create-user.dto';
 import { User } from '@prisma/client';
@@ -54,5 +54,20 @@ export class UsersController {
     const relative = `/uploads/avatars/${file.filename}`;
     await this.usersService.updateAvatar(user.id, relative);
     return { avatarUrl: relative };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Patch('me')
+  async updateMe(@Req() req: any, @Body() body: { username?: string }): Promise<{ id: number; username: string; avatarUrl: string | null }> {
+    const user = req.user;
+    const data: any = {};
+    if (body.username) {
+      const trimmed = body.username.trim();
+      if (trimmed.length < 3 || trimmed.length > 32) throw new BadRequestException('Username length 3-32');
+      data.username = trimmed;
+    }
+    if (Object.keys(data).length === 0) return { id: user.id, username: user.username, avatarUrl: user.avatarUrl };
+    const updated = await (this.usersService as any).prisma.user.update({ where: { id: user.id }, data });
+    return { id: updated.id, username: updated.username, avatarUrl: updated.avatarUrl };
   }
 }
